@@ -23,9 +23,12 @@ export default function App() {
       speed:     [0.0008, 0, 0.005, 0.0001] as [number, number, number, number],
     },
     hover: {
-      enabled: true,
-      color1:  '#5656F0',
-      color2:  '#40D9C6',
+      enabled:  true,
+      color1:   '#5656F0',
+      color2:   '#40D9C6',
+      radius:   [725, 50, 1200] as [number, number, number],
+      animate:  true,
+      speed:    [0.0024, 0, 0.02, 0.0001] as [number, number, number, number],
     },
   })
 
@@ -49,6 +52,9 @@ export default function App() {
         noiseScale={p.noise.scale}
         noiseSpeed={p.noise.speed}
         hoverColors={hoverColors}
+        hoverRadius={p.hover.radius}
+        hoverAnimate={p.hover.animate}
+        hoverSpeed={p.hover.speed}
       />
 
       <div style={styles.hero}>

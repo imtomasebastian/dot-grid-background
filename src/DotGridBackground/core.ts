@@ -70,10 +70,14 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
 
     const { dotRadius, influenceRadius, maxPush, returnSpeed,
             noiseAmplitude, noiseScale, noiseSpeed,
-            baseColor, baseOpacity, hoverColors, bottomFade } = opts
+            baseColor, baseOpacity, hoverColors, hoverRadius, hoverAnimate, hoverSpeed,
+            bottomFade } = opts
 
     const time = performance.now() * noiseSpeed
     const radiusSq = influenceRadius * influenceRadius
+    const hoverRadiusSq = hoverRadius * hoverRadius
+    const maxRadiusSq = Math.max(radiusSq, hoverRadiusSq)
+    const hoverPhase = hoverAnimate ? performance.now() * hoverSpeed : 0
 
     // Parse colours once per frame (cheap for a handful of values)
     const base = parseColor(baseColor)
@@ -85,28 +89,36 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     for (const dot of dots) {
       let targetX = dot.gx
       let targetY = dot.gy
-      let influence = 0
+      let influence = 0       // push + noise (influenceRadius)
+      let colorInfluence = 0  // hover colour (hoverRadius)
 
       if (mouse) {
         const dx = dot.gx - mouse.x
         const dy = dot.gy - mouse.y
         const distSq = dx * dx + dy * dy
 
-        if (distSq < radiusSq && distSq > 0) {
+        if (distSq > 0 && distSq < maxRadiusSq) {
           const dist = Math.sqrt(distSq)
-          influence = 1 - dist / influenceRadius       // 0 → 1 as cursor nears dot
-          const push = influence * influence * influence * maxPush
-          const nx = dx / dist
-          const ny = dy / dist
-          targetX = dot.gx + nx * push
-          targetY = dot.gy + ny * push
 
-          // Organic noise layered on top of the repel
-          const noiseX = noise2d(dot.gx * noiseScale, dot.gy * noiseScale + time)
-          const noiseY = noise2d(dot.gx * noiseScale + 100, dot.gy * noiseScale + time)
-          const noiseMag = influence * influence * noiseAmplitude
-          targetX += noiseX * noiseMag
-          targetY += noiseY * noiseMag
+          if (distSq < radiusSq) {
+            influence = 1 - dist / influenceRadius       // 0 → 1 as cursor nears dot
+            const push = influence * influence * influence * maxPush
+            const nx = dx / dist
+            const ny = dy / dist
+            targetX = dot.gx + nx * push
+            targetY = dot.gy + ny * push
+
+            // Organic noise layered on top of the repel
+            const noiseX = noise2d(dot.gx * noiseScale, dot.gy * noiseScale + time)
+            const noiseY = noise2d(dot.gx * noiseScale + 100, dot.gy * noiseScale + time)
+            const noiseMag = influence * influence * noiseAmplitude
+            targetX += noiseX * noiseMag
+            targetY += noiseY * noiseMag
+          }
+
+          if (distSq < hoverRadiusSq) {
+            colorInfluence = 1 - dist / hoverRadius
+          }
         }
       }
 
@@ -125,14 +137,17 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       // --- Colour ---
       let r = base[0], g = base[1], b = base[2]
 
-      if (influence > 0 && hover0 && hover1) {
+      if (colorInfluence > 0 && hover0 && hover1) {
         // Dim alpha near cursor
-        alpha *= 1 - influence * influence * 0.85
+        alpha *= 1 - colorInfluence * colorInfluence * 0.85
 
-        // Oscillate between the two hover colours based on angle + time
-        const angle = Math.atan2(dot.gy - (mouse?.y ?? 0), dot.gx - (mouse?.x ?? 0))
-        const t = (Math.sin(angle * 2 + time * 3) + 1) * 0.5
-        const blendAmt = influence * influence
+        // Angle for two-tone blend: cursor-relative when animating (pattern rotates with cursor),
+        // canvas-center-relative when static (pattern frozen in world space)
+        const angle = hoverAnimate
+          ? Math.atan2(dot.gy - (mouse?.y ?? canvasH / 2), dot.gx - (mouse?.x ?? canvasW / 2))
+          : Math.atan2(dot.gy - canvasH / 2, dot.gx - canvasW / 2)
+        const t = (Math.sin(angle * 2 + hoverPhase) + 1) * 0.5
+        const blendAmt = colorInfluence * colorInfluence
 
         const mixR = hover0[0] + t * (hover1[0] - hover0[0])
         const mixG = hover0[1] + t * (hover1[1] - hover0[1])

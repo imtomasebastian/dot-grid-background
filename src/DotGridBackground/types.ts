@@ -54,6 +54,24 @@ export interface DotGridOptions {
   hoverColors?: [string, string]
 
   /**
+   * Radius (px) of the hover-colour zone, independent of influenceRadius.
+   * When omitted, defaults to influenceRadius so colour reach matches push reach.
+   */
+  hoverRadius?: number
+
+  /**
+   * Whether the two-tone colour pattern animates over time.
+   * false = pattern is frozen (varies by angle only, no shimmer). Default: true
+   */
+  hoverAnimate?: boolean
+
+  /**
+   * Speed of the colour-pattern rotation (units: radians per millisecond × 1000).
+   * Only used when hoverAnimate is true. Default: 0.0024
+   */
+  hoverSpeed?: number
+
+  /**
    * Fade dots out toward the bottom edge of the canvas.
    * Fading starts at 75% of canvas height. Default: true
    */
@@ -76,11 +94,17 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   baseOpacity: 1,
   opacityRange: 0,
   hoverColors: undefined as unknown as [string, string], // optional — see DotGridOptions
+  hoverRadius: 725,
+  hoverAnimate: true,
+  hoverSpeed: 0.0024,
   bottomFade: true,
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {
-  return { ...DEFAULTS, ...opts }
+  const merged = { ...DEFAULTS, ...opts }
+  // hoverRadius defaults to influenceRadius when not explicitly set
+  if (opts.hoverRadius === undefined) merged.hoverRadius = merged.influenceRadius
+  return merged
 }
 
 /** Parse a CSS hex/rgb colour to [r, g, b] integers. */

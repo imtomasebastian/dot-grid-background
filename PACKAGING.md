@@ -40,10 +40,12 @@ Every `requestAnimationFrame`, for each dot on the grid:
 4. **Ease back** — lerp current position toward target each frame:
    `dot.x += (target − dot.x) × returnSpeed`. Lower `returnSpeed` = more lag/bounce feel.
 5. **Bottom fade** — alpha fades to 0 in the bottom 25% of the canvas.
-6. **Colour shift** (only when `hoverColors` is set and `a > 0`):
-   - Dim alpha: `alpha *= 1 − a² × 0.85`
-   - Compute angle from cursor to dot, use `sin(angle×2 + time×3)` to oscillate `t` 0→1
-   - Blend between `hoverColors[0]` and `hoverColors[1]` by `t`, mix into base color by `a²`
+6. **Colour shift** (only when `hoverColors` is set and the dot is within `hoverRadius`):
+   - `colorInfluence` is computed independently of the push `influence`, using `hoverRadius`
+   - Dim alpha: `alpha *= 1 − colorInfluence² × 0.85`
+   - `hoverPhase = hoverAnimate ? time × hoverSpeed : 0` — computed once per frame
+   - Compute angle from cursor to dot, use `sin(angle×2 + hoverPhase)` to oscillate `t` 0→1
+   - Blend between `hoverColors[0]` and `hoverColors[1]` by `t`, mix into base color by `colorInfluence²`
 7. **Draw** — `ctx.arc(x, y, dotRadius, 0, 2π)` filled with `rgba(r,g,b,alpha)`.
 
 ### opacityRange
@@ -88,6 +90,9 @@ Next.js App Router, Remix, etc.
 | `baseOpacity` | `number` | `1` | global max alpha |
 | `opacityRange` | `number` | `0` | per-dot random opacity variation (0 = uniform) |
 | `hoverColors` | `[string, string]` | `undefined` | two-tone cursor swirl; omit to keep base colour |
+| `hoverRadius` | `number` | `influenceRadius` | radius (px) of the colour zone, independent of push radius |
+| `hoverAnimate` | `boolean` | `true` | animate the colour pattern over time; `false` freezes it |
+| `hoverSpeed` | `number` | `0.0024` | speed of colour-pattern rotation (ignored when `hoverAnimate` false) |
 | `bottomFade` | `boolean` | `true` | fade dots toward bottom edge |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
