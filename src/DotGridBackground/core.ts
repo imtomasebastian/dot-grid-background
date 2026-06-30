@@ -29,6 +29,12 @@ interface MousePos {
   y: number
 }
 
+interface Ripple {
+  x: number
+  y: number
+  start: number
+}
+
 export interface DotGrid {
   update(opts: DotGridOptions): void
   destroy(): void
@@ -40,6 +46,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   let canvasW = 0
   let canvasH = 0
   let mouse: MousePos | null = null
+  let ripples: Ripple[] = []
   let rafId: number | null = null
 
   // --- Grid builder ---
@@ -71,18 +78,33 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     const { dotRadius, influenceRadius, maxPush, returnSpeed,
             noiseAmplitude, noiseScale, noiseSpeed,
             baseColor, baseOpacity, hoverColors, hoverRadius, hoverAnimate, hoverSpeed,
-            bottomFade } = opts
+            bottomFade,
+            rippleSpeed, rippleAmplitude, rippleWidth, rippleMaxRadius } = opts
 
-    const time = performance.now() * noiseSpeed
+    const now = performance.now()
+    const time = now * noiseSpeed
     const radiusSq = influenceRadius * influenceRadius
     const hoverRadiusSq = hoverRadius * hoverRadius
     const maxRadiusSq = Math.max(radiusSq, hoverRadiusSq)
-    const hoverPhase = hoverAnimate ? performance.now() * hoverSpeed : 0
+    const hoverPhase = hoverAnimate ? now * hoverSpeed : 0
 
     // Parse colours once per frame (cheap for a handful of values)
     const base = parseColor(baseColor)
     const hover0 = hoverColors ? parseColor(hoverColors[0]) : null
     const hover1 = hoverColors ? parseColor(hoverColors[1]) : null
+
+    // Prune finished ripples and precompute per-frame wavefront state
+    ripples = ripples.filter(r => (now - r.start) * rippleSpeed <= rippleMaxRadius)
+    const rippleFronts = ripples.map(r => {
+      const waveRadius = (now - r.start) * rippleSpeed
+      return {
+        x: r.x, y: r.y,
+        waveRadius,
+        decay: 1 - waveRadius / rippleMaxRadius,
+      }
+    })
+    const twoSigmaSq = 2 * rippleWidth * rippleWidth
+    const bandCutoff = rippleWidth * 3
 
     ctx.clearRect(0, 0, canvasW, canvasH)
 
@@ -119,6 +141,21 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
           if (distSq < hoverRadiusSq) {
             colorInfluence = 1 - dist / hoverRadius
           }
+        }
+      }
+
+      // Ripple contributions: add each active wavefront's radial push to target
+      if (rippleFronts.length) {
+        for (const rip of rippleFronts) {
+          const rdx = dot.gx - rip.x
+          const rdy = dot.gy - rip.y
+          const rd = Math.sqrt(rdx * rdx + rdy * rdy)
+          if (rd <= 0) continue
+          const front = rd - rip.waveRadius
+          if (front > bandCutoff || front < -bandCutoff) continue
+          const offset = Math.exp(-(front * front) / twoSigmaSq) * rippleAmplitude * rip.decay
+          targetX += (rdx / rd) * offset
+          targetY += (rdy / rd) * offset
         }
       }
 
@@ -221,8 +258,21 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     mouse = null
   }
 
+  function onPointerDown(e: PointerEvent) {
+    if (!opts.rippleEnabled) return
+    const parent = canvas.parentElement
+    if (!parent) return
+    const rect = parent.getBoundingClientRect()
+    if (
+      e.clientX < rect.left || e.clientX > rect.right ||
+      e.clientY < rect.top  || e.clientY > rect.bottom
+    ) return
+    ripples.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, start: performance.now() })
+  }
+
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseleave', onMouseLeave)
+  window.addEventListener('pointerdown', onPointerDown)
 
   // --- Start loop ---
   rafId = requestAnimationFrame(loop)
@@ -248,6 +298,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       resizeObserver.disconnect()
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseleave', onMouseLeave)
+      window.removeEventListener('pointerdown', onPointerDown)
     },
   }
 }

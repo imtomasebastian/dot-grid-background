@@ -48,6 +48,17 @@ Every `requestAnimationFrame`, for each dot on the grid:
    - Blend between `hoverColors[0]` and `hoverColors[1]` by `t`, mix into base color by `colorInfluence²`
 7. **Draw** — `ctx.arc(x, y, dotRadius, 0, 2π)` filled with `rgba(r,g,b,alpha)`.
 
+### Click ripple
+
+A click spawns a `{ x, y, start }` entry in a ripple array. Each frame:
+
+1. **Expand wavefront** — `waveRadius = (now − start) × rippleSpeed`.
+2. **Decay** — `decay = 1 − waveRadius / rippleMaxRadius`. Ripple is pruned when it reaches `rippleMaxRadius`.
+3. **Per dot** — compute the dot's distance from the click origin. `front = dist − waveRadius`. A Gaussian envelope `exp(−front² / 2σ²)` (where σ = `rippleWidth`) is zero except near the wavefront. Offset = `envelope × rippleAmplitude × decay` in the radial direction. This is added to the dot's `targetX/targetY` before the ease step.
+4. **Spring handles the rest** — the existing `returnSpeed` easing makes each dot spring out and settle back as the ring passes through it. No extra physics needed.
+
+Multiple ripples sum their contributions. Rapid clicks naturally stack.
+
 ### opacityRange
 
 Each dot gets `restOpacity = 1 − Math.random() × opacityRange` when the grid is built.
@@ -94,6 +105,11 @@ Next.js App Router, Remix, etc.
 | `hoverAnimate` | `boolean` | `true` | animate the colour pattern over time; `false` freezes it |
 | `hoverSpeed` | `number` | `0.0024` | speed of colour-pattern rotation (ignored when `hoverAnimate` false) |
 | `bottomFade` | `boolean` | `true` | fade dots toward bottom edge |
+| `rippleEnabled` | `boolean` | `true` | enable click-to-ripple shockwave |
+| `rippleSpeed` | `number` | `0.5` | wavefront expansion speed (px/ms) |
+| `rippleAmplitude` | `number` | `30` | peak outward push at the wavefront (px) |
+| `rippleWidth` | `number` | `70` | Gaussian σ — wave band thickness (px) |
+| `rippleMaxRadius` | `number` | `800` | travel distance before fade-out (px) |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
 | `style` | `CSSProperties` | — | React-only: wrapper inline style |

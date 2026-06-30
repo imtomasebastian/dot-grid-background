@@ -30,6 +30,13 @@ export default function App() {
       animate:  true,
       speed:    [0.0024, 0, 0.02, 0.0001] as [number, number, number, number],
     },
+    ripple: {
+      enabled:   true,
+      speed:     [0.5, 0.05, 2, 0.05] as [number, number, number, number],
+      amplitude: [30, 0, 120] as [number, number, number],
+      width:     [70, 10, 300] as [number, number, number],
+      maxRadius: [800, 100, 2000] as [number, number, number],
+    },
   })
 
   const hoverColors = p.hover.enabled
@@ -55,6 +62,11 @@ export default function App() {
         hoverRadius={p.hover.radius}
         hoverAnimate={p.hover.animate}
         hoverSpeed={p.hover.speed}
+        rippleEnabled={p.ripple.enabled}
+        rippleSpeed={p.ripple.speed}
+        rippleAmplitude={p.ripple.amplitude}
+        rippleWidth={p.ripple.width}
+        rippleMaxRadius={p.ripple.maxRadius}
       />
 
       <div style={styles.hero}>

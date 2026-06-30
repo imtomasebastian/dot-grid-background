@@ -76,6 +76,36 @@ export interface DotGridOptions {
    * Fading starts at 75% of canvas height. Default: true
    */
   bottomFade?: boolean
+
+  // --- Click ripple ---
+
+  /**
+   * Enable click-to-ripple: a click spawns an expanding shockwave that
+   * pushes dots outward as the ring passes through them. Default: true
+   */
+  rippleEnabled?: boolean
+
+  /**
+   * How fast the wavefront expands (px per millisecond). Default: 0.5
+   */
+  rippleSpeed?: number
+
+  /**
+   * Peak outward displacement at the wavefront (px). Default: 30
+   */
+  rippleAmplitude?: number
+
+  /**
+   * Gaussian σ — thickness of the wave band (px).
+   * Higher = softer, more spread-out ring. Default: 70
+   */
+  rippleWidth?: number
+
+  /**
+   * How far (px) the ripple travels before fully fading out.
+   * Also determines the ripple's lifetime. Default: 800
+   */
+  rippleMaxRadius?: number
 }
 
 /** Resolved options with all defaults filled in. */
@@ -98,6 +128,11 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   hoverAnimate: true,
   hoverSpeed: 0.0024,
   bottomFade: true,
+  rippleEnabled: true,
+  rippleSpeed: 0.5,
+  rippleAmplitude: 30,
+  rippleWidth: 70,
+  rippleMaxRadius: 800,
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {
