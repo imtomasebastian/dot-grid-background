@@ -1,0 +1,5 @@
+export { DotGridBackground } from './DotGridBackground'
+export type { DotGridBackgroundProps } from './DotGridBackground'
+export type { DotGridOptions } from './types'
+export { createDotGrid } from './core'
+export type { DotGrid } from './core'
