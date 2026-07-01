@@ -64,6 +64,51 @@ a colour mix toward the ripple colour: `amt = env × decay × rippleColorIntensi
 layered on top of whatever the glow produced, so the two effects compose cleanly — the ripple
 colour momentarily overrides the glow exactly where the ring is strongest.
 
+### Cross-instance sync (`rippleGroup` / `cursorTracking`)
+
+These are two independent props for two effects with fundamentally different needs: ripple is a
+discrete event that must be *relayed* between instances (needs a named channel), while cursor
+reaction is a continuous distance-bounded field (a channel doesn't add anything a plain global
+read doesn't already give you). Mixing them into a single group knob was tried first and dropped
+— see "Design history" below.
+
+- **`rippleGroup?: string`** — opt-in ripple relay channel. Each instance already listens for
+  clicks on `window` (not its own div) and stores ripple origins as `client − ownRect`, so the
+  same screen-space click point maps to correct local coordinates in every instance for free.
+  When `rippleGroup` is set, a click doesn't spawn a ripple directly — it broadcasts
+  `{ group, clientX, clientY }` via a `window` `CustomEvent('dotgrid:ripple')` instead. Every
+  instance (including the one clicked) listens for that event, and any instance whose own
+  `rippleGroup` matches seeds a ripple using its *own* rect to convert the shared screen point
+  into local coordinates. Reads as one continuous ring sweeping across every grouped instance,
+  gap between divs included. A ripple still fades out after `rippleMaxRadius`, so grids farther
+  apart than that need a larger radius (and/or `rippleSpeed`) for the wave to visibly arrive.
+  Omit for a solo grid — no broadcast, no listen. Group members should occupy non-overlapping
+  screen regions (overlap double-counts clicks) — don't group a full-bleed background with a
+  nested grid.
+- **`cursorTracking?: 'hover' | 'global'`** (default `'global'`) — per-instance, no broadcast at
+  all. Covers push *and* hover/glow together, since both are driven by the same `mouse` position.
+  `'global'` tracks the page cursor everywhere (converted to local coords via its own rect on
+  every move); `influenceRadius`/`hoverRadius` bound how far the effect visibly reaches, so
+  several nearby grids read as one continuous field (no cut-out in the gap between them) while
+  far-apart grids stay calm on their own — the cursor is simply out of range. `'hover'` reacts
+  only while the cursor is over that instance's own rect — right for discrete cards/tiles that
+  should light up only when directly pointed at, not whenever the mouse is nearby.
+
+There's intentionally no `cursorGroup` for isolated cursor sub-fields (e.g. two clusters on the
+same page that shouldn't influence each other's cursor reaction). Every real scenario considered
+was already covered by distance falloff (far-apart clusters self-isolate under `'global'`) or by
+`'hover'` (a lone card that shouldn't react to a neighboring cluster's cursor) — a true cursor
+sub-group would only matter for two internally-connected clusters crammed within
+`influenceRadius` of each other, which is a narrow enough case to defer.
+
+**Design history:** an earlier version unified both under one `syncGroup` + `syncEffects:
+('ripple' | 'cursor')[]` pair, with cursor sync gated on a per-instance "cursor is over me"
+broadcast (only active while some group member was hovered). That gate cut the cursor effect off
+entirely in the gap between grouped instances — a distracting flicker when dragging across it.
+Switching cursor to unconditional global tracking fixed the flicker, but made the shared group id
+meaningless for cursor (any two `'global'` instances look synced regardless of id) while ripple
+still needed a real channel — so the two were split into separate props instead.
+
 ### opacityRange
 
 Each dot gets `restOpacity = 1 − Math.random() × opacityRange` when the grid is built.
@@ -117,6 +162,8 @@ Next.js App Router, Remix, etc.
 | `rippleMaxRadius` | `number` | `800` | travel distance before fade-out (px) |
 | `rippleColor` | `string` | `undefined` | colour the wave tints dots toward; omit = push-only |
 | `rippleColorIntensity` | `number` | `1` | peak tint strength at the wavefront (0–1) |
+| `rippleGroup` | `string` | `undefined` | opt-in channel: instances sharing a group id ripple together as one ring |
+| `cursorTracking` | `'hover' \| 'global'` | `'global'` | `'global'` follows the cursor anywhere (bounded by influenceRadius); `'hover'` reacts only when the cursor is over this instance |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
 | `style` | `CSSProperties` | — | React-only: wrapper inline style |

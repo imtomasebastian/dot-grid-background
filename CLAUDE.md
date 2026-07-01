@@ -12,6 +12,7 @@ reading it.
 Interactive animated dot-grid canvas background. Vite + React 19 + TypeScript.
 
 Architecture: **framework-agnostic core engine + thin React wrapper.**
+
 - `src/DotGridBackground/` — the publishable component (zero runtime dependencies — non-negotiable)
 - `src/App.tsx` + `src/main.tsx` — demo only (DialKit live panel lives here, nowhere else)
 
@@ -37,20 +38,11 @@ Do not execute packaging steps without being explicitly asked to.
 
 ## Where things live
 
-| What | File |
-|---|---|
-| Props + defaults | `src/DotGridBackground/types.ts` |
-| All draw logic | `src/DotGridBackground/core.ts` |
-| React wrapper | `src/DotGridBackground/DotGridBackground.tsx` |
-| Demo + DialKit panel | `src/App.tsx` |
-| Algorithm docs + npm publish guide | `PACKAGING.md` |
-| Handoff / session state | `docs/HANDOFF.md` |
-
-## Handoff document
-
-**Location:** `docs/HANDOFF.md`
-
-Keep this file up to date at the end of every working session (or when the user runs
-`/handoff`). It should capture: what's done, what's verified, possible next steps, and any
-decisions made that aren't obvious from the code. Reference `PACKAGING.md` and the plan file
-rather than duplicating content.
+| What                               | File                                          |
+| ---------------------------------- | --------------------------------------------- |
+| Props + defaults                   | `src/DotGridBackground/types.ts`              |
+| All draw logic                     | `src/DotGridBackground/core.ts`               |
+| React wrapper                      | `src/DotGridBackground/DotGridBackground.tsx` |
+| Demo + DialKit panel               | `src/App.tsx`                                 |
+| Algorithm docs + npm publish guide | `PACKAGING.md`                                |
+| Handoff / session state            | `docs/HANDOFF.md`                             |

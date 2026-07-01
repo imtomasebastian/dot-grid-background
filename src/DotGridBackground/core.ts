@@ -35,6 +35,14 @@ interface Ripple {
   start: number
 }
 
+const RIPPLE_EVENT = 'dotgrid:ripple'
+
+interface RippleBroadcast {
+  group: string
+  clientX: number
+  clientY: number
+}
+
 export interface DotGrid {
   update(opts: DotGridOptions): void
   destroy(): void
@@ -48,6 +56,12 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   let mouse: MousePos | null = null
   let ripples: Ripple[] = []
   let rafId: number | null = null
+
+  let lastClient: { x: number; y: number } | null = null // raw viewport cursor
+
+  function rippleSync() {
+    return !!opts.rippleGroup
+  }
 
   // --- Grid builder ---
 
@@ -177,7 +191,11 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       }
 
       // --- Colour ---
-      let r = base[0], g = base[1], b = base[2]
+      // Glow and ripple each compute their own delta from `base` independently, then the
+      // deltas are summed. Blending ripple from the glow's already-tinted output (instead of
+      // from base) would make the ripple vanish wherever the glow phase already leans toward
+      // rippleColor — this keeps the two effects from competing for the same channel.
+      let glowDR = 0, glowDG = 0, glowDB = 0
 
       if (colorInfluence > 0 && hover0 && hover1) {
         // Dim alpha near cursor
@@ -195,18 +213,28 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         const mixG = hover0[1] + t * (hover1[1] - hover0[1])
         const mixB = hover0[2] + t * (hover1[2] - hover0[2])
 
-        r = Math.round(base[0] + blendAmt * (mixR - base[0]))
-        g = Math.round(base[1] + blendAmt * (mixG - base[1]))
-        b = Math.round(base[2] + blendAmt * (mixB - base[2]))
+        glowDR = blendAmt * (mixR - base[0])
+        glowDG = blendAmt * (mixG - base[1])
+        glowDB = blendAmt * (mixB - base[2])
       }
 
-      // Ripple colour wave: layer on top of whatever the glow produced
+      let rippleDR = 0, rippleDG = 0, rippleDB = 0
+
       if (rippleRGB && rippleColorAmt > 0) {
         const amt = Math.min(1, rippleColorAmt * rippleColorIntensity)
-        r = Math.round(r + amt * (rippleRGB[0] - r))
-        g = Math.round(g + amt * (rippleRGB[1] - g))
-        b = Math.round(b + amt * (rippleRGB[2] - b))
+        rippleDR = amt * (rippleRGB[0] - base[0])
+        rippleDG = amt * (rippleRGB[1] - base[1])
+        rippleDB = amt * (rippleRGB[2] - base[2])
       }
+
+      // Sum the two deltas rather than picking a winner: a "larger delta wins" combine still
+      // lets a strong, sustained glow delta swamp a weaker ripple delta on the same channel
+      // (e.g. mid-decay ripple envelope against a fully-saturated glow) — the exact muting this
+      // fix targets. Summing guarantees the ripple always contributes visibly, scaled by its own
+      // envelope/intensity, regardless of what the glow is doing on that channel.
+      const r = Math.round(Math.max(0, Math.min(255, base[0] + glowDR + rippleDR)))
+      const g = Math.round(Math.max(0, Math.min(255, base[1] + glowDG + rippleDG)))
+      const b = Math.round(Math.max(0, Math.min(255, base[2] + glowDB + rippleDB)))
 
       if (alpha <= 0) continue
 
@@ -253,22 +281,40 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
 
   // --- Mouse tracking ---
 
-  function onMouseMove(e: MouseEvent) {
+  // The single place `mouse` is decided from the raw viewport cursor.
+  // 'hover' grids only react while the cursor is over themselves.
+  // 'global' grids (default) track the page cursor everywhere — influenceRadius/
+  // hoverRadius already bound how far the effect visibly reaches, so nearby grids
+  // read as one continuous field instead of cutting out in the gaps between them.
+  function recomputeMouse() {
     const parent = canvas.parentElement
-    if (!parent) return
-    const rect = parent.getBoundingClientRect()
-    if (
-      e.clientX < rect.left || e.clientX > rect.right ||
-      e.clientY < rect.top || e.clientY > rect.bottom
-    ) {
+    if (!lastClient || !parent) {
       mouse = null
       return
     }
-    mouse = { x: e.clientX - rect.left, y: e.clientY - rect.top }
+    const rect = parent.getBoundingClientRect()
+    const localX = lastClient.x - rect.left
+    const localY = lastClient.y - rect.top
+
+    if (opts.cursorTracking === 'global') {
+      mouse = { x: localX, y: localY }
+      return
+    }
+
+    const overSelf =
+      lastClient.x >= rect.left && lastClient.x <= rect.right &&
+      lastClient.y >= rect.top && lastClient.y <= rect.bottom
+    mouse = overSelf ? { x: localX, y: localY } : null
+  }
+
+  function onMouseMove(e: MouseEvent) {
+    lastClient = { x: e.clientX, y: e.clientY }
+    recomputeMouse()
   }
 
   function onMouseLeave() {
-    mouse = null
+    lastClient = null
+    recomputeMouse()
   }
 
   function onPointerDown(e: PointerEvent) {
@@ -280,12 +326,34 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       e.clientX < rect.left || e.clientX > rect.right ||
       e.clientY < rect.top  || e.clientY > rect.bottom
     ) return
+
+    if (rippleSync()) {
+      // Broadcast in screen coords — every grid in the group (including this
+      // one) spawns its own ripple via onRippleBroadcast, seeded from the
+      // same world point, so the wave looks continuous across instances.
+      window.dispatchEvent(new CustomEvent<RippleBroadcast>(RIPPLE_EVENT, {
+        detail: { group: opts.rippleGroup, clientX: e.clientX, clientY: e.clientY },
+      }))
+      return
+    }
+
     ripples.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, start: performance.now() })
+  }
+
+  function onRippleBroadcast(e: Event) {
+    if (!opts.rippleEnabled || !rippleSync()) return
+    const { group, clientX, clientY } = (e as CustomEvent<RippleBroadcast>).detail
+    if (group !== opts.rippleGroup) return
+    const parent = canvas.parentElement
+    if (!parent) return
+    const rect = parent.getBoundingClientRect()
+    ripples.push({ x: clientX - rect.left, y: clientY - rect.top, start: performance.now() })
   }
 
   window.addEventListener('mousemove', onMouseMove)
   window.addEventListener('mouseleave', onMouseLeave)
   window.addEventListener('pointerdown', onPointerDown)
+  window.addEventListener(RIPPLE_EVENT, onRippleBroadcast)
 
   // --- Start loop ---
   rafId = requestAnimationFrame(loop)
@@ -312,6 +380,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       window.removeEventListener('mousemove', onMouseMove)
       window.removeEventListener('mouseleave', onMouseLeave)
       window.removeEventListener('pointerdown', onPointerDown)
+      window.removeEventListener(RIPPLE_EVENT, onRippleBroadcast)
     },
   }
 }

@@ -119,6 +119,26 @@ export interface DotGridOptions {
    * 0 = no colour; 1 = full tint at the centre of the band. Default: 1
    */
   rippleColorIntensity?: number
+
+  /**
+   * Opt-in ripple relay channel. Grids sharing a non-empty group id ripple
+   * together as one continuous ring — a click on any one sweeps across all
+   * of them (own local coords, converted from the shared screen point).
+   * Omit for a solo grid (default — no broadcast, no listen). Example: 'hero'
+   */
+  rippleGroup?: string
+
+  /**
+   * How the grid reacts to the cursor (push + hover/glow — both are driven
+   * by the same cursor position, so they travel together).
+   * `'global'` (default) = follow the page cursor anywhere, bounded by
+   * influenceRadius/hoverRadius — several grids read as one continuous
+   * field, and far-apart grids stay calm on their own since the cursor is
+   * out of reach.
+   * `'hover'` = react only while the cursor is over this grid — right for
+   * discrete cards/tiles that should light up only when pointed at.
+   */
+  cursorTracking?: 'hover' | 'global'
 }
 
 /** Resolved options with all defaults filled in. */
@@ -148,6 +168,8 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   rippleMaxRadius: 800,
   rippleColor: undefined as unknown as string, // optional — see DotGridOptions
   rippleColorIntensity: 1,
+  rippleGroup: undefined as unknown as string, // optional — see DotGridOptions
+  cursorTracking: 'global',
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {

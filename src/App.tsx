@@ -40,6 +40,10 @@ export default function App() {
       color:          '#5656F0',
       colorIntensity: [1, 0, 1] as [number, number, number],
     },
+    sync: {
+      ripple: true,
+      cursorGlobal: true,
+    },
   })
 
   const hoverColors = p.hover.enabled
@@ -80,6 +84,30 @@ export default function App() {
         <h1 style={styles.heroTitle}>Dot Grid Background</h1>
         <p style={styles.heroSub}>Move your cursor around to interact with the dots.</p>
       </div>
+
+      {/* rippleGroup + cursorTracking demo: two separate grids. rippleGroup relays
+          clicks between them; cursorTracking="global" (vs "hover") makes the
+          push/glow field continuous across the gap instead of cutting out. */}
+      <div style={styles.groupDemoBoxA}>
+        <DotGridBackground
+          rippleGroup={p.sync.ripple ? 'demo' : undefined}
+          cursorTracking={p.sync.cursorGlobal ? 'global' : 'hover'}
+          rippleMaxRadius={2000}
+          rippleSpeed={0.8}
+          rippleColor="#40D9C6"
+          hoverColors={['#5656F0', '#40D9C6']}
+        />
+      </div>
+      <div style={styles.groupDemoBoxB}>
+        <DotGridBackground
+          rippleGroup={p.sync.ripple ? 'demo' : undefined}
+          cursorTracking={p.sync.cursorGlobal ? 'global' : 'hover'}
+          rippleMaxRadius={2000}
+          rippleSpeed={0.8}
+          rippleColor="#40D9C6"
+          hoverColors={['#5656F0', '#40D9C6']}
+        />
+      </div>
     </div>
   )
 }
@@ -107,5 +135,24 @@ const styles = {
   heroSub: {
     fontSize: 'clamp(0.9rem, 2vw, 1.2rem)',
     color: 'rgba(255,255,255,0.5)',
+  },
+  groupDemoBoxA: {
+    position: 'absolute' as const,
+    top: 24,
+    left: 24,
+    width: 280,
+    height: 180,
+    border: '1px solid rgba(255,255,255,0.15)',
+  },
+  groupDemoBoxB: {
+    // Offset below dead-center so it doesn't sit under the hero title/subtitle,
+    // which occupy the exact vertical center via the flex-centered hero div.
+    position: 'absolute' as const,
+    top: '72%',
+    left: '50%',
+    width: 280,
+    height: 180,
+    transform: 'translate(-50%, -50%)',
+    border: '1px solid rgba(255,255,255,0.15)',
   },
 }
