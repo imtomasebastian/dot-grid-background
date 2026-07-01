@@ -106,6 +106,19 @@ export interface DotGridOptions {
    * Also determines the ripple's lifetime. Default: 800
    */
   rippleMaxRadius?: number
+
+  /**
+   * Colour the ripple wave tints dots toward as it passes.
+   * When omitted the ripple is displacement-only (no colour shift).
+   * Example: '#5656F0'
+   */
+  rippleColor?: string
+
+  /**
+   * Peak tint strength at the wavefront (0–1).
+   * 0 = no colour; 1 = full tint at the centre of the band. Default: 1
+   */
+  rippleColorIntensity?: number
 }
 
 /** Resolved options with all defaults filled in. */
@@ -133,6 +146,8 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   rippleAmplitude: 30,
   rippleWidth: 70,
   rippleMaxRadius: 800,
+  rippleColor: undefined as unknown as string, // optional — see DotGridOptions
+  rippleColorIntensity: 1,
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {

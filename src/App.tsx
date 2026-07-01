@@ -31,17 +31,22 @@ export default function App() {
       speed:    [0.0024, 0, 0.02, 0.0001] as [number, number, number, number],
     },
     ripple: {
-      enabled:   true,
-      speed:     [0.5, 0.05, 2, 0.05] as [number, number, number, number],
-      amplitude: [30, 0, 120] as [number, number, number],
-      width:     [70, 10, 300] as [number, number, number],
-      maxRadius: [800, 100, 2000] as [number, number, number],
+      enabled:        true,
+      speed:          [0.5, 0.05, 2, 0.05] as [number, number, number, number],
+      amplitude:      [30, 0, 120] as [number, number, number],
+      width:          [70, 10, 300] as [number, number, number],
+      maxRadius:      [800, 100, 2000] as [number, number, number],
+      colorEnabled:   true,
+      color:          '#5656F0',
+      colorIntensity: [1, 0, 1] as [number, number, number],
     },
   })
 
   const hoverColors = p.hover.enabled
     ? ([p.hover.color1, p.hover.color2] as [string, string])
     : undefined
+
+  const rippleColor = p.ripple.colorEnabled ? p.ripple.color : undefined
 
   return (
     <div style={{ position: 'relative', minHeight: '100vh', background: p.background }}>
@@ -67,6 +72,8 @@ export default function App() {
         rippleAmplitude={p.ripple.amplitude}
         rippleWidth={p.ripple.width}
         rippleMaxRadius={p.ripple.maxRadius}
+        rippleColor={rippleColor}
+        rippleColorIntensity={p.ripple.colorIntensity}
       />
 
       <div style={styles.hero}>

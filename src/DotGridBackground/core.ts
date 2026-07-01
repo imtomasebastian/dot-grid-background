@@ -79,7 +79,8 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
             noiseAmplitude, noiseScale, noiseSpeed,
             baseColor, baseOpacity, hoverColors, hoverRadius, hoverAnimate, hoverSpeed,
             bottomFade,
-            rippleSpeed, rippleAmplitude, rippleWidth, rippleMaxRadius } = opts
+            rippleSpeed, rippleAmplitude, rippleWidth, rippleMaxRadius,
+            rippleColor, rippleColorIntensity } = opts
 
     const now = performance.now()
     const time = now * noiseSpeed
@@ -92,6 +93,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     const base = parseColor(baseColor)
     const hover0 = hoverColors ? parseColor(hoverColors[0]) : null
     const hover1 = hoverColors ? parseColor(hoverColors[1]) : null
+    const rippleRGB = rippleColor ? parseColor(rippleColor) : null
 
     // Prune finished ripples and precompute per-frame wavefront state
     ripples = ripples.filter(r => (now - r.start) * rippleSpeed <= rippleMaxRadius)
@@ -144,7 +146,8 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         }
       }
 
-      // Ripple contributions: add each active wavefront's radial push to target
+      // Ripple contributions: radial push + track max colour envelope across active ripples
+      let rippleColorAmt = 0
       if (rippleFronts.length) {
         for (const rip of rippleFronts) {
           const rdx = dot.gx - rip.x
@@ -153,9 +156,11 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
           if (rd <= 0) continue
           const front = rd - rip.waveRadius
           if (front > bandCutoff || front < -bandCutoff) continue
-          const offset = Math.exp(-(front * front) / twoSigmaSq) * rippleAmplitude * rip.decay
-          targetX += (rdx / rd) * offset
-          targetY += (rdy / rd) * offset
+          const env = Math.exp(-(front * front) / twoSigmaSq)
+          targetX += (rdx / rd) * env * rippleAmplitude * rip.decay
+          targetY += (rdy / rd) * env * rippleAmplitude * rip.decay
+          const colorAmt = env * rip.decay
+          if (colorAmt > rippleColorAmt) rippleColorAmt = colorAmt
         }
       }
 
@@ -193,6 +198,14 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         r = Math.round(base[0] + blendAmt * (mixR - base[0]))
         g = Math.round(base[1] + blendAmt * (mixG - base[1]))
         b = Math.round(base[2] + blendAmt * (mixB - base[2]))
+      }
+
+      // Ripple colour wave: layer on top of whatever the glow produced
+      if (rippleRGB && rippleColorAmt > 0) {
+        const amt = Math.min(1, rippleColorAmt * rippleColorIntensity)
+        r = Math.round(r + amt * (rippleRGB[0] - r))
+        g = Math.round(g + amt * (rippleRGB[1] - g))
+        b = Math.round(b + amt * (rippleRGB[2] - b))
       }
 
       if (alpha <= 0) continue

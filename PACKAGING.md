@@ -59,6 +59,11 @@ A click spawns a `{ x, y, start }` entry in a ripple array. Each frame:
 
 Multiple ripples sum their contributions. Rapid clicks naturally stack.
 
+If `rippleColor` is set, the same Gaussian envelope `env` that drives displacement also drives
+a colour mix toward the ripple colour: `amt = env × decay × rippleColorIntensity`. The tint is
+layered on top of whatever the glow produced, so the two effects compose cleanly — the ripple
+colour momentarily overrides the glow exactly where the ring is strongest.
+
 ### opacityRange
 
 Each dot gets `restOpacity = 1 − Math.random() × opacityRange` when the grid is built.
@@ -110,6 +115,8 @@ Next.js App Router, Remix, etc.
 | `rippleAmplitude` | `number` | `30` | peak outward push at the wavefront (px) |
 | `rippleWidth` | `number` | `70` | Gaussian σ — wave band thickness (px) |
 | `rippleMaxRadius` | `number` | `800` | travel distance before fade-out (px) |
+| `rippleColor` | `string` | `undefined` | colour the wave tints dots toward; omit = push-only |
+| `rippleColorIntensity` | `number` | `1` | peak tint strength at the wavefront (0–1) |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
 | `style` | `CSSProperties` | — | React-only: wrapper inline style |
