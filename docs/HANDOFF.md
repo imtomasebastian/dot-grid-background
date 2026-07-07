@@ -167,6 +167,18 @@ not a uniform field). Resolved via a `/grill-me` session — see
     `dist/` on install via `prepare`, and `import { DotGridBackground, createDotGrid } from
     'dot-grid-background'` resolves both exports correctly.
   - Documented in `PACKAGING.md` under "Interim distribution: private git dependency".
+  - **Follow-up fix (v0.1.1)**: the user caught that the first cut of packaging silently broke the
+    "framework-agnostic core, zero runtime deps" architecture promise — `index.ts` bundled the
+    React wrapper and the vanilla `createDotGrid` engine into one entry point, so
+    `import { createDotGrid } from 'dot-grid-background'` still pulled in `react` internally, even
+    though `core.ts`/`types.ts`/`perlin.ts` themselves never import it. Fixed by adding a second
+    public entry: `src/DotGridBackground/vanilla.ts` (re-exports `createDotGrid`/`DotGrid`/
+    `DotGridOptions` only) built as its own `tsup` entry, exposed as the `./core` subpath
+    (`dot-grid-background/core`) in `package.json` `exports`. `react`/`react-dom` marked
+    `optional: true` in `peerDependenciesMeta` since the `./core` subpath doesn't need them.
+    Verified in a scratch project with **no react anywhere in `node_modules`**: `import {
+    createDotGrid } from 'dot-grid-background/core'` resolves and works; `grep` confirmed
+    `dist/core.js` has zero `react` references. Tagged `v0.1.1`.
 
 ## Possible next steps (nothing committed to)
 - **npm packaging**: `PACKAGING.md` steps 4–8 remain (README, LICENSE, `npm pack` local test, flip `private` to `false`, `npm publish`). Explicitly deferred — do only when asked.

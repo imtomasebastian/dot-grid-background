@@ -21,7 +21,8 @@ change when adding Vue/Svelte/vanilla-JS support later.
 | `src/DotGridBackground/types.ts` | `DotGridOptions` interface, defaults, `resolveOptions()`, `parseColor()` |
 | `src/DotGridBackground/core.ts` | `createDotGrid(canvas, opts)` — owns grid, rAF loop, ResizeObserver, mouse tracking |
 | `src/DotGridBackground/DotGridBackground.tsx` | React wrapper (`'use client'`), fade-in, prop forwarding |
-| `src/DotGridBackground/index.ts` | Public exports |
+| `src/DotGridBackground/index.ts` | Public exports — main entry (`.`), includes the React wrapper, requires `react`/`react-dom` |
+| `src/DotGridBackground/vanilla.ts` | Public exports — `./core` subpath entry, framework-agnostic only, no `react` import anywhere in its bundle |
 | `src/App.tsx` | Demo: full-screen background + live control panel |
 
 ---
@@ -173,6 +174,20 @@ Next.js App Router, Remix, etc.
 
 ---
 
+## Entry points
+
+The package ships two entries so the framework-agnostic core is actually reachable without React,
+not just architected that way internally:
+
+- **`dot-grid-background`** (main, `.`) — `DotGridBackground` React component. Requires `react`/
+  `react-dom` (declared as `peerDependencies`, marked `optional` in `peerDependenciesMeta` since
+  they're only needed if you use this entry).
+- **`dot-grid-background/core`** (`./core`) — `createDotGrid(canvas, opts)` + `DotGridOptions`
+  type only. Zero runtime dependencies, verified by building it as its own `tsup` entry
+  (`src/DotGridBackground/vanilla.ts`) so it's a physically separate bundle — `dist/core.js` has
+  no `react` import anywhere in it, confirmed by grepping the built output. Use this for a vanilla
+  `<canvas>` in a non-React project.
+
 ## Props reference
 
 | Prop | Type | Default | Description |
@@ -266,7 +281,7 @@ library fields, since this repo doubles as the demo app:
 {
   "name": "dot-grid-background",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
@@ -276,6 +291,11 @@ library fields, since this repo doubles as the demo app:
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
+    },
+    "./core": {
+      "types": "./dist/core.d.ts",
+      "import": "./dist/core.js",
+      "require": "./dist/core.cjs"
     }
   },
   "files": ["dist"],
@@ -290,6 +310,10 @@ library fields, since this repo doubles as the demo app:
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-dom": { "optional": true }
   },
   "dependencies": {
     "react": "^19.1.0",
@@ -321,7 +345,10 @@ Key points:
 import { defineConfig } from 'tsup'
 
 export default defineConfig({
-  entry: ['src/DotGridBackground/index.ts'],
+  entry: {
+    index: 'src/DotGridBackground/index.ts',
+    core: 'src/DotGridBackground/vanilla.ts',
+  },
   format: ['esm', 'cjs'],
   dts: true,
   tsconfig: 'tsconfig.app.json',
