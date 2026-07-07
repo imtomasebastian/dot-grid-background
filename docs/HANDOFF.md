@@ -141,18 +141,36 @@ not a uniform field). Resolved via a `/grill-me` session — see
   animated drift is added later — deliberately not built yet.
   - Verified live via `agent-browser` screenshots: organic blobs with real gaps (not scattered
     single dots), `clusterEdge` visibly sharp vs feathered, `clusterSeed` reshuffling the layout.
-- **Distribution decision (not executed)**: reuse across the user's other projects will go through
-  a **private git dependency** (git URL + tag, `prepare` script runs the `tsup` build on install),
-  not `npm link`/`file:` (machine-local, breaks for other checkouts/CI) or GitHub Packages (needs
-  `.npmrc` auth tokens everywhere). Chosen specifically because it's a strict subset of the
-  existing `PACKAGING.md` npm-publish steps — going public later is just adding `npm publish` on
-  top of the same build, no rework. Documented in `PACKAGING.md` under "Interim distribution:
-  private git dependency". **Deferred** — build it only when explicitly asked (per this project's
-  packaging rule).
+- **Distribution — executed this session**: reuse across the user's other projects goes through a
+  **private git dependency**, not `npm link`/`file:` (machine-local, breaks for other checkouts/CI)
+  or GitHub Packages (needs `.npmrc` auth tokens everywhere). Chosen specifically because it's a
+  strict subset of the existing `PACKAGING.md` npm-publish steps — going public later is just
+  adding `npm publish` on top of the same build, no rework. What was done:
+  - Discovered `node_modules` had been committed the whole time (no `.gitignore` existed) — added
+    `.gitignore` (`node_modules`, `dist`, `*.local`) and `git rm -r --cached node_modules` before
+    pushing anywhere, so the repo isn't bloated for every future clone.
+  - Created private GitHub repo `imtomasebastian/dot-grid-background`, pushed `main`.
+  - `package.json` rewritten to serve both the demo (`dev`/`build`/`preview` via vite, unchanged)
+    and the library (`name: "dot-grid-background"`, `main`/`module`/`types`/`exports` pointing at
+    `dist/`, `files: ["dist"]`, `sideEffects: false`, `react`/`react-dom` moved to
+    `peerDependencies` *and* kept in `dependencies` so the demo still runs standalone). Added
+    `"prepare": "tsup"` so `dist/` is built automatically on install for git-dependency consumers
+    (who never see committed build output). `"private": true` kept as a guard against an accidental
+    `npm publish` until the user explicitly decides to go public.
+  - `tsup.config.ts` added per `PACKAGING.md` (ESM+CJS+dts, `'use client'` banner) — needed one
+    tweak beyond the doc: `tsconfig: 'tsconfig.app.json'` explicitly, since the root `tsconfig.json`
+    is reference-only (no compiler options / no `jsx` setting) under this project's solution-style
+    TS config, so tsup's default tsconfig lookup failed on `.tsx` without it.
+  - Tagged `v0.1.0`, pushed the tag.
+  - **Verified end-to-end** in a scratch project: `npm install
+    "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"` actually builds
+    `dist/` on install via `prepare`, and `import { DotGridBackground, createDotGrid } from
+    'dot-grid-background'` resolves both exports correctly.
+  - Documented in `PACKAGING.md` under "Interim distribution: private git dependency".
 
 ## Possible next steps (nothing committed to)
-- **npm packaging**: fully documented in `PACKAGING.md` (tsup config, package.json exports/peerDeps, README, LICENSE, `npm pack`, publish). Explicitly deferred — was always a documented "next milestone," not to be executed without a go-ahead.
-- **Private git dependency setup** (steps 1–3 of `PACKAGING.md` + a `prepare` script) — decided this session as the reuse path, not yet executed; do only when asked.
+- **npm packaging**: `PACKAGING.md` steps 4–8 remain (README, LICENSE, `npm pack` local test, flip `private` to `false`, `npm publish`). Explicitly deferred — do only when asked.
+- **Consume in another project**: add `"dot-grid-background": "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"` to that project's `package.json` and `npm install`. Bump the `#vX.Y.Z` tag (new tag pushed from this repo) to pick up updates.
 - **Custom SVG glow shape** (single shape, no morph) — deferred this session, see above.
 - **Granular per-property breathe knobs** (`glowBreatheRadiusDepth` etc.) — only if the single coupled `glowAnimateDepth` ratio proves too rigid in practice.
 - **Animated cluster drift** — `clusterMask(gx, gy)` is structured to take a time term later; not built.

@@ -216,28 +216,39 @@ Next.js App Router, Remix, etc.
 
 ---
 
-## Interim distribution: private git dependency
+## Interim distribution: private git dependency (done)
 
-Before a public npm release, the plan for reusing this in other projects is a **private git
+Before a public npm release, this repo is reused in other projects as a **private git
 dependency**, not `npm link`/`file:` (machine-local only, breaks for other checkouts/CI) and not
-GitHub Packages (needs an `.npmrc` auth token in every consumer + CI). Consumers install straight
-from a private repo + tag:
+GitHub Packages (needs an `.npmrc` auth token in every consumer + CI). This is executed and live:
+
+- Private repo: `github.com/imtomasebastian/dot-grid-background`, tagged `v0.1.0`.
+- `package.json` has library `exports`/`peerDependencies`/`files` (steps 1–2 below) alongside the
+  existing demo scripts, plus a `"prepare": "tsup"` script so `dist/` builds automatically on
+  install — consumers never need to commit build output.
+- `tsup.config.ts` sets `tsconfig: 'tsconfig.app.json'` explicitly (see step 3) since this repo's
+  root `tsconfig.json` is reference-only.
+
+Consumers install straight from the repo + tag:
 
 ```json
-"dot-grid-background": "git+ssh://git@github.com/you/repo.git#v0.1.0"
+"dot-grid-background": "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"
 ```
 
-This still requires steps 1–3 below (tsup + `package.json` + `tsup.config.ts`) so there's a real
-build to install — plus a `"prepare": "tsup"` script so the build runs automatically on install
-(consumers don't need to commit `dist/`). Going public later is not a migration: it's the same
-`package.json`/build, just add `npm publish` (step 8) on top. Not executed yet — deferred until
-explicitly requested.
+To ship an update: bump code, commit, `git tag vX.Y.Z && git push origin vX.Y.Z`, then consumers
+bump the `#vX.Y.Z` in their `package.json` and run `npm install` again (git-URL deps don't
+auto-update on `npm update`).
+
+Going public later is not a migration: it's the same `package.json`/build, just flip `"private"`
+to `false` and add `npm publish` (step 8) on top.
 
 ## Steps to publish to npm
 
-These steps assume you want to publish as e.g. `@yourscope/dot-grid-background`.
+Steps 1–3 are already done (see "Interim distribution" above) — `tsup` is installed,
+`package.json` has the library fields, and `tsup.config.ts` exists. What's left for a public
+release starts at step 4. Kept below for reference/history.
 
-### 1. Add `tsup` (the build tool)
+### 1. Add `tsup` (the build tool) — done
 
 ```bash
 npm install --save-dev tsup
@@ -246,54 +257,65 @@ npm install --save-dev tsup
 `tsup` compiles TypeScript to ESM + CJS + `.d.ts` type declarations in one command,
 which is the standard for modern npm packages.
 
-### 2. Update `package.json`
+### 2. Update `package.json` — done
 
-Replace the current demo `package.json` with a library-focused one:
+The actual `package.json` keeps the demo's `dev`/`build`/`preview` scripts (vite) alongside the
+library fields, since this repo doubles as the demo app:
 
 ```json
 {
-  "name": "@yourscope/dot-grid-background",
+  "name": "dot-grid-background",
+  "private": true,
   "version": "0.1.0",
-  "description": "Interactive animated dot-grid canvas background for React",
-  "license": "MIT",
-  "author": "Your Name",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
-      "require": "./dist/index.cjs",
-      "types": "./dist/index.d.ts"
+      "require": "./dist/index.cjs"
     }
   },
   "files": ["dist"],
   "sideEffects": false,
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "build:lib": "tsup",
+    "prepare": "tsup"
+  },
   "peerDependencies": {
     "react": ">=18",
     "react-dom": ">=18"
   },
-  "devDependencies": {
-    "@types/react": "^19.1.0",
+  "dependencies": {
     "react": "^19.1.0",
-    "react-dom": "^19.1.0",
-    "tsup": "^8.0.0",
-    "typescript": "~5.8.3"
+    "react-dom": "^19.1.0"
   },
-  "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch"
+  "devDependencies": {
+    "...": "vite, @vitejs/plugin-react, dialkit, motion, tsup, typescript — demo + build tooling"
   }
 }
 ```
 
 Key points:
-- `react` and `react-dom` move to `peerDependencies` — not bundled into the output.
+- `react`/`react-dom` are in **both** `peerDependencies` (what a consumer must supply — not
+  bundled into `dist/`, see `external` below) and `dependencies` (so the demo app in this same
+  repo runs standalone via `npm run dev`).
 - `sideEffects: false` lets bundlers tree-shake the package.
-- `files: ["dist"]` — only the compiled output ships to npm, not the demo source.
+- `files: ["dist"]` — only matters for `npm publish`/`npm pack`; git-dependency installs clone the
+  whole repo regardless, which is why `.gitignore`-ing `node_modules`/`dist` matters for repo size.
+- The `types` condition must come **first** in `exports` — esbuild/tsup warns if it comes after
+  `import`/`require`, since those are matched first and `types` would never be reached.
+- `"private": true` stays until an explicit decision to publish publicly — flip it to `false` as
+  part of step 8.
+- `"prepare": "tsup"` — not in the original public-npm plan, added specifically so git-dependency
+  consumers get a built `dist/` automatically on `npm install` (see "Interim distribution" above).
 
-### 3. Add `tsup.config.ts`
+### 3. Add `tsup.config.ts` — done
 
 ```ts
 import { defineConfig } from 'tsup'
@@ -302,6 +324,7 @@ export default defineConfig({
   entry: ['src/DotGridBackground/index.ts'],
   format: ['esm', 'cjs'],
   dts: true,
+  tsconfig: 'tsconfig.app.json',
   sourcemap: true,
   clean: true,
   external: ['react', 'react-dom'],
@@ -312,7 +335,10 @@ export default defineConfig({
 ```
 
 The `banner` ensures the `'use client'` directive is at the top of the compiled output,
-which is required for Next.js App Router to treat this as a client component.
+which is required for Next.js App Router to treat this as a client component. `tsconfig:
+'tsconfig.app.json'` is set explicitly — this repo's root `tsconfig.json` is a solution-style file
+with no compiler options of its own (just `references`), so tsup's default lookup can't find the
+`jsx` setting needed to type-check `.tsx` without pointing at the real config directly.
 
 ### 4. Add `README.md`
 
@@ -326,7 +352,8 @@ Create an MIT (or your preferred) license file.
 ### 6. Build and verify
 
 ```bash
-npm run build
+npm run build:lib
+# ("build" is taken by the demo's vite build — the library build is "build:lib")
 # Inspect dist/ — should contain:
 #   dist/index.js        (ESM)
 #   dist/index.cjs       (CommonJS)
