@@ -40,12 +40,24 @@ Every `requestAnimationFrame`, for each dot on the grid:
 4. **Ease back** — lerp current position toward target each frame:
    `dot.x += (target − dot.x) × returnSpeed`. Lower `returnSpeed` = more lag/bounce feel.
 5. **Bottom fade** — alpha fades to 0 in the bottom 25% of the canvas.
-6. **Colour shift** (only when `hoverColors` is set and the dot is within `hoverRadius`):
-   - `colorInfluence` is computed independently of the push `influence`, using `hoverRadius`
-   - Dim alpha: `alpha *= 1 − colorInfluence² × 0.85`
-   - `hoverPhase = hoverAnimate ? time × hoverSpeed : 0` — computed once per frame
-   - Compute angle from cursor to dot, use `sin(angle×2 + hoverPhase)` to oscillate `t` 0→1
-   - Blend between `hoverColors[0]` and `hoverColors[1]` by `t`, mix into base color by `colorInfluence²`
+6. **Glow tint** (only when `glowColor` is set and the dot is within `glowRadius`):
+   - `colorInfluence` is computed independently of the push `influence`, using `glowRadius`
+   - Smoothstep falloff with a solid core: full tint (`colorInfluence = 1`) through the inner
+     `(1 − glowSoftness)` fraction of the radius, then feathers to 0 across the outer
+     `glowSoftness` band — no hard edge, but `glowRadius` stays a real outer boundary
+   - `glowAnimation` (`'none' | 'pulse' | 'breathe'`, default `'none'`) drives an optional
+     animation, computed once per frame from a shared phase:
+     `contract = glowAnimateDepth × (0.5 − 0.5×cos(time × glowAnimateSpeed))` (0 at full inhale,
+     up to `glowAnimateDepth` at full exhale). `'none'` → `contract = 0`, fully static.
+     `'pulse'` → only `effIntensity = glowIntensity × (1 − contract)`; radius/softness stay fixed.
+     `'breathe'` (watchOS-Breathe-style) → radius and intensity contract together while softness
+     rises, then expand back with softness falling: `effRadius = glowRadius × (1 − contract)`,
+     `effIntensity = glowIntensity × (1 − contract)`, `effSoftness = glowSoftness + (1 −
+     glowSoftness) × contract`. One shared depth/speed pair drives whichever mode is active; if a
+     single coupled ratio ever proves too rigid, the natural next step is per-property knobs
+     (`glowBreatheRadiusDepth`, etc.) instead of the shared `glowAnimateDepth`.
+   - Mix toward `glowColor` by `colorInfluence × effIntensity` (no alpha dimming — the tint itself
+     is the highlight)
 7. **Draw** — `ctx.arc(x, y, dotRadius, 0, 2π)` filled with `rgba(r,g,b,alpha)`.
 
 ### Click ripple
@@ -86,9 +98,9 @@ read doesn't already give you). Mixing them into a single group knob was tried f
   screen regions (overlap double-counts clicks) — don't group a full-bleed background with a
   nested grid.
 - **`cursorTracking?: 'hover' | 'global'`** (default `'global'`) — per-instance, no broadcast at
-  all. Covers push *and* hover/glow together, since both are driven by the same `mouse` position.
+  all. Covers push *and* glow together, since both are driven by the same `mouse` position.
   `'global'` tracks the page cursor everywhere (converted to local coords via its own rect on
-  every move); `influenceRadius`/`hoverRadius` bound how far the effect visibly reaches, so
+  every move); `influenceRadius`/`glowRadius` bound how far the effect visibly reaches, so
   several nearby grids read as one continuous field (no cut-out in the gap between them) while
   far-apart grids stay calm on their own — the cursor is simply out of range. `'hover'` reacts
   only while the cursor is over that instance's own rect — right for discrete cards/tiles that
@@ -114,7 +126,33 @@ still needed a real channel — so the two were split into separate props instea
 Each dot gets `restOpacity = 1 − Math.random() × opacityRange` when the grid is built.
 This is a one-time random value, so dots don't flicker — they just have varied resting
 brightnesses. It's applied as a multiplier before all other alpha operations, so bottom-fade
-and hover-dim compose on top cleanly.
+composes on top cleanly.
+
+### Clustered coverage (`clusterEnabled`)
+
+Instead of a uniform field, dots can be masked into organic blobs with gaps between them —
+a Perlin-noise threshold mask, computed once per dot at grid build time (like `opacityRange`,
+static unless the grid rebuilds):
+
+```
+freq = 1 / clusterSize
+n    = (noise2d(gx×freq + clusterSeed×1000, gy×freq + clusterSeed×1000) + 1) / 2   // → [0, 1]
+threshold = 1 − clusterCoverage
+mask = clusterEdge <= 0
+  ? (n >= threshold ? 1 : 0)                                    // hard cutoff
+  : smoothstep(threshold − clusterEdge×0.5, threshold + clusterEdge×0.5, n)  // feathered
+restOpacity = (1 − Math.random() × opacityRange) × mask
+```
+
+`clusterSize` reads as "bigger = larger blobs" (internally the inverse of noise frequency);
+`clusterCoverage` is roughly the fraction of area covered — approximate, not exact, since Perlin
+values aren't uniformly distributed; `clusterEdge` is 0 (sharp) to 1 (soft feather) at each blob's
+boundary; `clusterSeed` (integer) offsets the noise sample coordinates, so the same seed always
+reproduces the same layout and changing it reshuffles. The mask multiplies onto `restOpacity`
+independently of `opacityRange`, so both stack — a dot inside a cluster can still get random rest-
+opacity dimming. Glow, ripple, and bottom-fade are untouched (they all read the same `restOpacity`
+downstream). Clusters are static today; the mask function takes only `(gx, gy)`, but is the single
+place a time term would go if animated drift is added later.
 
 ### HiDPI / resize
 
@@ -150,10 +188,13 @@ Next.js App Router, Remix, etc.
 | `baseColor` | `string` | `'#444'` | dot colour at rest |
 | `baseOpacity` | `number` | `1` | global max alpha |
 | `opacityRange` | `number` | `0` | per-dot random opacity variation (0 = uniform) |
-| `hoverColors` | `[string, string]` | `undefined` | two-tone cursor swirl; omit to keep base colour |
-| `hoverRadius` | `number` | `influenceRadius` | radius (px) of the colour zone, independent of push radius |
-| `hoverAnimate` | `boolean` | `true` | animate the colour pattern over time; `false` freezes it |
-| `hoverSpeed` | `number` | `0.0024` | speed of colour-pattern rotation (ignored when `hoverAnimate` false) |
+| `glowColor` | `string` | `undefined` | colour the cursor's glow region tints toward; omit to keep base colour |
+| `glowRadius` | `number` | `influenceRadius` | radius (px) of the glow zone, independent of push radius |
+| `glowIntensity` | `number` | `1` | peak tint strength at the core (0–1) |
+| `glowSoftness` | `number` | `0.33` | fraction of `glowRadius` that feathers (0 = hard disc, 1 = full dome) |
+| `glowAnimation` | `'none' \| 'pulse' \| 'breathe'` | `'none'` | glow animation mode — static, intensity-only pulse, or watchOS-style breathe (radius+intensity+softness coupled) |
+| `glowAnimateDepth` | `number` | `0.3` | how deep the glow animation swings (0 = static regardless of mode) |
+| `glowAnimateSpeed` | `number` | `0.0014` | glow animation rate |
 | `bottomFade` | `boolean` | `true` | fade dots toward bottom edge |
 | `rippleEnabled` | `boolean` | `true` | enable click-to-ripple shockwave |
 | `rippleSpeed` | `number` | `0.5` | wavefront expansion speed (px/ms) |
@@ -163,12 +204,34 @@ Next.js App Router, Remix, etc.
 | `rippleColor` | `string` | `undefined` | colour the wave tints dots toward; omit = push-only |
 | `rippleColorIntensity` | `number` | `1` | peak tint strength at the wavefront (0–1) |
 | `rippleGroup` | `string` | `undefined` | opt-in channel: instances sharing a group id ripple together as one ring |
+| `clusterEnabled` | `boolean` | `false` | enable clustered coverage (Perlin-mask blobs instead of a uniform field) |
+| `clusterSize` | `number` | `400` | approximate blob size (px-ish scale) — bigger = larger clusters |
+| `clusterCoverage` | `number` | `0.4` | roughly the fraction (0–1) of the area covered by clusters |
+| `clusterEdge` | `number` | `0.3` | blob edge softness (0 = sharp cutoff, 1 = soft feather) |
+| `clusterSeed` | `number` | `0` | integer seed — changes the cluster layout; same seed reproduces it |
 | `cursorTracking` | `'hover' \| 'global'` | `'global'` | `'global'` follows the cursor anywhere (bounded by influenceRadius); `'hover'` reacts only when the cursor is over this instance |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
 | `style` | `CSSProperties` | — | React-only: wrapper inline style |
 
 ---
+
+## Interim distribution: private git dependency
+
+Before a public npm release, the plan for reusing this in other projects is a **private git
+dependency**, not `npm link`/`file:` (machine-local only, breaks for other checkouts/CI) and not
+GitHub Packages (needs an `.npmrc` auth token in every consumer + CI). Consumers install straight
+from a private repo + tag:
+
+```json
+"dot-grid-background": "git+ssh://git@github.com/you/repo.git#v0.1.0"
+```
+
+This still requires steps 1–3 below (tsup + `package.json` + `tsup.config.ts`) so there's a real
+build to install — plus a `"prepare": "tsup"` script so the build runs automatically on install
+(consumers don't need to commit `dist/`). Going public later is not a migration: it's the same
+`package.json`/build, just add `npm publish` (step 8) on top. Not executed yet — deferred until
+explicitly requested.
 
 ## Steps to publish to npm
 

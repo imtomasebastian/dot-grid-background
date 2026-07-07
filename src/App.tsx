@@ -22,13 +22,15 @@ export default function App() {
       scale:     [0.04, 0.001, 0.15, 0.001] as [number, number, number, number],
       speed:     [0.0008, 0, 0.005, 0.0001] as [number, number, number, number],
     },
-    hover: {
-      enabled:  true,
-      color1:   '#5656F0',
-      color2:   '#40D9C6',
-      radius:   [725, 50, 1200] as [number, number, number],
-      animate:  true,
-      speed:    [0.0024, 0, 0.02, 0.0001] as [number, number, number, number],
+    glow: {
+      enabled:      true,
+      color:        '#5656F0',
+      radius:       [725, 50, 1200] as [number, number, number],
+      intensity:    [1, 0, 1] as [number, number, number],
+      softness:     [0.33, 0, 1, 0.01] as [number, number, number, number],
+      animation:    { type: 'select', options: ['none', 'pulse', 'breathe'], default: 'none' } as const,
+      animateDepth: [0.3, 0, 1, 0.01] as [number, number, number, number],
+      animateSpeed: [0.0014, 0, 0.005, 0.0001] as [number, number, number, number],
     },
     ripple: {
       enabled:        true,
@@ -40,15 +42,20 @@ export default function App() {
       color:          '#5656F0',
       colorIntensity: [1, 0, 1] as [number, number, number],
     },
+    clusters: {
+      enabled:  false,
+      size:     [400, 50, 1200] as [number, number, number],
+      coverage: [0.4, 0, 1, 0.01] as [number, number, number, number],
+      edge:     [0.3, 0, 1, 0.01] as [number, number, number, number],
+      seed:     [0, 0, 20, 1] as [number, number, number, number],
+    },
     sync: {
       ripple: true,
       cursorGlobal: true,
     },
   })
 
-  const hoverColors = p.hover.enabled
-    ? ([p.hover.color1, p.hover.color2] as [string, string])
-    : undefined
+  const glowColor = p.glow.enabled ? p.glow.color : undefined
 
   const rippleColor = p.ripple.colorEnabled ? p.ripple.color : undefined
 
@@ -67,10 +74,13 @@ export default function App() {
         noiseAmplitude={p.noise.amplitude}
         noiseScale={p.noise.scale}
         noiseSpeed={p.noise.speed}
-        hoverColors={hoverColors}
-        hoverRadius={p.hover.radius}
-        hoverAnimate={p.hover.animate}
-        hoverSpeed={p.hover.speed}
+        glowColor={glowColor}
+        glowRadius={p.glow.radius}
+        glowIntensity={p.glow.intensity}
+        glowSoftness={p.glow.softness}
+        glowAnimation={p.glow.animation as 'none' | 'pulse' | 'breathe'}
+        glowAnimateDepth={p.glow.animateDepth}
+        glowAnimateSpeed={p.glow.animateSpeed}
         rippleEnabled={p.ripple.enabled}
         rippleSpeed={p.ripple.speed}
         rippleAmplitude={p.ripple.amplitude}
@@ -78,6 +88,11 @@ export default function App() {
         rippleMaxRadius={p.ripple.maxRadius}
         rippleColor={rippleColor}
         rippleColorIntensity={p.ripple.colorIntensity}
+        clusterEnabled={p.clusters.enabled}
+        clusterSize={p.clusters.size}
+        clusterCoverage={p.clusters.coverage}
+        clusterEdge={p.clusters.edge}
+        clusterSeed={p.clusters.seed}
       />
 
       <div style={styles.hero}>
@@ -88,26 +103,7 @@ export default function App() {
       {/* rippleGroup + cursorTracking demo: two separate grids. rippleGroup relays
           clicks between them; cursorTracking="global" (vs "hover") makes the
           push/glow field continuous across the gap instead of cutting out. */}
-      <div style={styles.groupDemoBoxA}>
-        <DotGridBackground
-          rippleGroup={p.sync.ripple ? 'demo' : undefined}
-          cursorTracking={p.sync.cursorGlobal ? 'global' : 'hover'}
-          rippleMaxRadius={2000}
-          rippleSpeed={0.8}
-          rippleColor="#40D9C6"
-          hoverColors={['#5656F0', '#40D9C6']}
-        />
-      </div>
-      <div style={styles.groupDemoBoxB}>
-        <DotGridBackground
-          rippleGroup={p.sync.ripple ? 'demo' : undefined}
-          cursorTracking={p.sync.cursorGlobal ? 'global' : 'hover'}
-          rippleMaxRadius={2000}
-          rippleSpeed={0.8}
-          rippleColor="#40D9C6"
-          hoverColors={['#5656F0', '#40D9C6']}
-        />
-      </div>
+
     </div>
   )
 }

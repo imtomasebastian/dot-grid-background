@@ -65,8 +65,29 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
 
   // --- Grid builder ---
 
+  function smoothstep(edge0: number, edge1: number, x: number): number {
+    const t = Math.min(1, Math.max(0, (x - edge0) / (edge1 - edge0)))
+    return t * t * (3 - 2 * t)
+  }
+
+  // Perlin-threshold mask for clustered coverage: dots inside a blob get ~1,
+  // dots outside get ~0, with a feathered band around the threshold. Computed
+  // once per dot at build time (static clusters). If animated drift is added
+  // later, this is the single place a time term would offset the sample.
+  function clusterMask(gx: number, gy: number): number {
+    const { clusterSize, clusterCoverage, clusterEdge, clusterSeed } = opts
+    const freq = 1 / clusterSize
+    const seedOffset = clusterSeed * 1000
+    const v = noise2d(gx * freq + seedOffset, gy * freq + seedOffset) // ~[-1, 1]
+    const n = (v + 1) / 2 // → [0, 1]
+    const threshold = 1 - clusterCoverage
+    if (clusterEdge <= 0) return n >= threshold ? 1 : 0
+    const band = clusterEdge * 0.5
+    return smoothstep(threshold - band, threshold + band, n)
+  }
+
   function buildGrid(w: number, h: number) {
-    const { gridSpacing, opacityRange } = opts
+    const { gridSpacing, opacityRange, clusterEnabled } = opts
     const cols = Math.ceil(w / gridSpacing) + 1
     const rows = Math.ceil(h / gridSpacing) + 1
     const next: Dot[] = []
@@ -74,10 +95,9 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       for (let col = 0; col < cols; col++) {
         const gx = col * gridSpacing
         const gy = row * gridSpacing
-        next.push({
-          gx, gy, x: gx, y: gy,
-          restOpacity: 1 - Math.random() * opacityRange,
-        })
+        let restOpacity = 1 - Math.random() * opacityRange
+        if (clusterEnabled) restOpacity *= clusterMask(gx, gy)
+        next.push({ gx, gy, x: gx, y: gy, restOpacity })
       }
     }
     dots = next
@@ -91,7 +111,8 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
 
     const { dotRadius, influenceRadius, maxPush, returnSpeed,
             noiseAmplitude, noiseScale, noiseSpeed,
-            baseColor, baseOpacity, hoverColors, hoverRadius, hoverAnimate, hoverSpeed,
+            baseColor, baseOpacity, glowColor, glowRadius, glowIntensity,
+            glowSoftness, glowAnimation, glowAnimateDepth, glowAnimateSpeed,
             bottomFade,
             rippleSpeed, rippleAmplitude, rippleWidth, rippleMaxRadius,
             rippleColor, rippleColorIntensity } = opts
@@ -99,14 +120,26 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     const now = performance.now()
     const time = now * noiseSpeed
     const radiusSq = influenceRadius * influenceRadius
-    const hoverRadiusSq = hoverRadius * hoverRadius
-    const maxRadiusSq = Math.max(radiusSq, hoverRadiusSq)
-    const hoverPhase = hoverAnimate ? now * hoverSpeed : 0
+
+    // Glow animation: one shared phase drives 'pulse' (intensity only) or
+    // 'breathe' (radius + intensity contract together while softness rises,
+    // watchOS-Breathe-style). `contract` is 0 at full inhale, up to
+    // glowAnimateDepth at full exhale; glowAnimateDepth = 0 freezes both modes.
+    const contract = glowAnimation === 'none'
+      ? 0
+      : glowAnimateDepth * (0.5 - 0.5 * Math.cos(now * glowAnimateSpeed))
+    const effGlowIntensity = glowIntensity * (1 - contract)
+    const effGlowRadius = glowAnimation === 'breathe' ? glowRadius * (1 - contract) : glowRadius
+    const effGlowSoftness = glowAnimation === 'breathe'
+      ? glowSoftness + (1 - glowSoftness) * contract
+      : glowSoftness
+
+    const glowRadiusSq = effGlowRadius * effGlowRadius
+    const maxRadiusSq = Math.max(radiusSq, glowRadius * glowRadius)
 
     // Parse colours once per frame (cheap for a handful of values)
     const base = parseColor(baseColor)
-    const hover0 = hoverColors ? parseColor(hoverColors[0]) : null
-    const hover1 = hoverColors ? parseColor(hoverColors[1]) : null
+    const glowRGB = glowColor ? parseColor(glowColor) : null
     const rippleRGB = rippleColor ? parseColor(rippleColor) : null
 
     // Prune finished ripples and precompute per-frame wavefront state
@@ -128,7 +161,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       let targetX = dot.gx
       let targetY = dot.gy
       let influence = 0       // push + noise (influenceRadius)
-      let colorInfluence = 0  // hover colour (hoverRadius)
+      let colorInfluence = 0  // glow colour (glowRadius)
 
       if (mouse) {
         const dx = dot.gx - mouse.x
@@ -154,8 +187,17 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
             targetY += noiseY * noiseMag
           }
 
-          if (distSq < hoverRadiusSq) {
-            colorInfluence = 1 - dist / hoverRadius
+          if (distSq < glowRadiusSq) {
+            // Smoothstep falloff with a solid core: full tint through the inner
+            // (1 - effGlowSoftness) fraction of the radius, feathering only in the outer band.
+            const norm = dist / effGlowRadius
+            const innerEdge = 1 - effGlowSoftness
+            if (norm <= innerEdge) {
+              colorInfluence = 1
+            } else {
+              const f = (norm - innerEdge) / effGlowSoftness
+              colorInfluence = 1 - f * f * (3 - 2 * f)
+            }
           }
         }
       }
@@ -197,25 +239,11 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       // rippleColor — this keeps the two effects from competing for the same channel.
       let glowDR = 0, glowDG = 0, glowDB = 0
 
-      if (colorInfluence > 0 && hover0 && hover1) {
-        // Dim alpha near cursor
-        alpha *= 1 - colorInfluence * colorInfluence * 0.85
-
-        // Angle for two-tone blend: cursor-relative when animating (pattern rotates with cursor),
-        // canvas-center-relative when static (pattern frozen in world space)
-        const angle = hoverAnimate
-          ? Math.atan2(dot.gy - (mouse?.y ?? canvasH / 2), dot.gx - (mouse?.x ?? canvasW / 2))
-          : Math.atan2(dot.gy - canvasH / 2, dot.gx - canvasW / 2)
-        const t = (Math.sin(angle * 2 + hoverPhase) + 1) * 0.5
-        const blendAmt = colorInfluence * colorInfluence
-
-        const mixR = hover0[0] + t * (hover1[0] - hover0[0])
-        const mixG = hover0[1] + t * (hover1[1] - hover0[1])
-        const mixB = hover0[2] + t * (hover1[2] - hover0[2])
-
-        glowDR = blendAmt * (mixR - base[0])
-        glowDG = blendAmt * (mixG - base[1])
-        glowDB = blendAmt * (mixB - base[2])
+      if (colorInfluence > 0 && glowRGB) {
+        const amt = colorInfluence * effGlowIntensity
+        glowDR = amt * (glowRGB[0] - base[0])
+        glowDG = amt * (glowRGB[1] - base[1])
+        glowDB = amt * (glowRGB[2] - base[2])
       }
 
       let rippleDR = 0, rippleDG = 0, rippleDB = 0
@@ -284,7 +312,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   // The single place `mouse` is decided from the raw viewport cursor.
   // 'hover' grids only react while the cursor is over themselves.
   // 'global' grids (default) track the page cursor everywhere — influenceRadius/
-  // hoverRadius already bound how far the effect visibly reaches, so nearby grids
+  // glowRadius already bound how far the effect visibly reaches, so nearby grids
   // read as one continuous field instead of cutting out in the gaps between them.
   function recomputeMouse() {
     const parent = canvas.parentElement
@@ -365,10 +393,16 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       const prev = opts
       opts = resolveOptions({ ...prev, ...newOpts })
 
-      // Rebuild grid if spacing or opacityRange changed (dot count / positions change)
+      // Rebuild grid if spacing, opacityRange, or any cluster prop changed
+      // (all affect the build-time restOpacity of each dot)
       if (
         newOpts.gridSpacing !== undefined ||
-        newOpts.opacityRange !== undefined
+        newOpts.opacityRange !== undefined ||
+        newOpts.clusterEnabled !== undefined ||
+        newOpts.clusterSize !== undefined ||
+        newOpts.clusterCoverage !== undefined ||
+        newOpts.clusterEdge !== undefined ||
+        newOpts.clusterSeed !== undefined
       ) {
         buildGrid(canvasW, canvasH)
       }

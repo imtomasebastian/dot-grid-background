@@ -23,7 +23,7 @@ export interface DotGridBackgroundProps extends DotGridOptions {
  * Example:
  * ```tsx
  * <div style={{ position: 'relative', height: '100vh' }}>
- *   <DotGridBackground hoverColors={['#5656F0', '#40D9C6']} />
+ *   <DotGridBackground glowColor="#5656F0" />
  *   <h1 style={{ position: 'relative' }}>Hello</h1>
  * </div>
  * ```

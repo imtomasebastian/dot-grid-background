@@ -73,9 +73,89 @@ channels, reading as a brief brightening/whitish flash rather than a pure colour
 with the user yet — revisit only if it looks off in practice (e.g. soften via a lower
 `rippleColorIntensity`, or scale the sum instead of hard-clamping).
 
+## Glow rework — single-colour soft glow (replaces two-tone hover) — done this session
+
+User didn't like the old two-tone rotating glow (`hoverColors` blend + near-cursor dimming) —
+felt out of place next to the rest of the effect. Replaced with a single-colour soft tint,
+modeled on the ripple colour wave the user already liked (pure delta-from-`base` tint, no
+separate brightness/alpha term — a bright colour on a dark base *is* the highlight).
+
+- **Old props removed entirely** (pre-release, clean break): `hoverColors`, `hoverRadius`,
+  `hoverAnimate`, `hoverSpeed`, and the whole rotating angular two-tone blend + the
+  `alpha *= 1 - colorInfluence² * 0.85` dimming line.
+- **New props (`glow*` prefix, confirmed naming)**: `glowColor`, `glowRadius`, `glowIntensity`,
+  `glowSoftness`, `glowPulseDepth`, `glowPulseSpeed`.
+- **Falloff = smoothstep with a solid core**: full tint through the inner `(1 - glowSoftness)`
+  fraction of `glowRadius`, feathering only across the outer `glowSoftness` band. `glowRadius`
+  stays a real, predictable outer boundary (unlike a Gaussian, which never reaches exactly zero).
+- **Pulse is explicitly experimental** — a slow breathing oscillation of `glowIntensity`
+  (`effIntensity = glowIntensity × (1 − glowPulseDepth × (0.5 − 0.5·cos(time × glowPulseSpeed)))`),
+  flagged as the first thing to cut if it doesn't fit in practice. `glowPulseDepth: 0` disables it.
+- The existing glow×ripple **summed-delta combine is unchanged** — glow and ripple still each
+  compute their own colour delta from `base` and sum them, so the ripple color-interaction fix
+  (see below) still holds.
+- Custom SVG-defined glow areas + shape morphing were discussed and **explicitly deferred** as a
+  separate future milestone — a true morph needs a runtime dependency (breaks the zero-dep core
+  rule), and a heavily-feathered custom shape reads as a blob anyway. If revisited: rasterize the
+  SVG to an offscreen canvas, blur it, sample the bitmap per-dot — no morph library needed for a
+  single static shape.
+- Plan: `~/.claude/plans/i-don-t-like-the-abstract-alpaca.md`.
+
+## Glow animation modes (`glowAnimation`) + clustered coverage (`clusterEnabled`) — done this session
+
+User's ask: the old always-on intensity pulse (`glowPulseDepth` defaulting to `0.3`) felt
+persistent rather than opt-in; wanted a second watchOS-Breathe-style animation to choose from
+instead; and wanted an optional clustered/sparse coverage mode (organic blobs of dots with gaps,
+not a uniform field). Resolved via a `/grill-me` session — see
+`~/.claude/plans/okay-there-are-few-precious-lagoon.md` for the full decision log.
+
+- **`glowPulseDepth`/`glowPulseSpeed` removed** (pre-release, clean break) — replaced by a single
+  mode selector: **`glowAnimation: 'none' | 'pulse' | 'breathe'`**, default `'none'` (glow is now
+  fully static unless opted in — this was the actual "not persistent" ask). Shared knobs
+  **`glowAnimateDepth`** / **`glowAnimateSpeed`** drive whichever mode is active, computed from one
+  phase: `contract = glowAnimateDepth × (0.5 − 0.5·cos(time × glowAnimateSpeed))`.
+  - `'pulse'` = old behaviour, intensity-only: `effIntensity = glowIntensity × (1 − contract)`,
+    radius/softness fixed.
+  - `'breathe'` = new, radius + intensity contract together while softness rises (then expand back
+    with softness falling) — one coupled motion, tuned ratio baked in rather than exposed as
+    separate knobs: `effRadius = glowRadius × (1 − contract)`, `effIntensity = glowIntensity × (1 −
+    contract)`, `effSoftness = glowSoftness + (1 − glowSoftness) × contract`.
+  - If the single shared ratio ever feels too rigid, the documented escape hatch is granular
+    per-property knobs (e.g. `glowBreatheRadiusDepth`) — deliberately not built yet (YAGNI until
+    proven needed).
+  - Verified live via `agent-browser`: canvas pixel sampling confirmed `'none'` is flat over time,
+    `'pulse'` keeps a far point continuously tinted (varying strength, never drops to baseline —
+    radius fixed), `'breathe'` makes a far point genuinely enter/exit the tinted zone over time
+    (radius really contracts/expands, not just intensity).
+- **Clustered coverage** — new opt-in props: `clusterEnabled` (default `false`, mirrors
+  `rippleEnabled`'s explicit-boolean pattern), `clusterSize` (bigger = larger blobs, size-oriented
+  naming chosen over raw noise-frequency naming for consumer-facing clarity), `clusterCoverage`
+  (~fraction of area covered, approximate since Perlin values aren't uniform), `clusterEdge` (0 =
+  sharp cutoff, 1 = soft feather), `clusterSeed` (integer; reshuffles the layout, same seed
+  reproduces it). Implemented as a **Perlin-noise threshold mask** (reusing `perlin.ts`, still
+  zero-dep), computed once per dot in `buildGrid()` and **multiplied onto `restOpacity`** — stacks
+  independently with `opacityRange` (a dot inside a cluster can still get random rest-opacity
+  dimming) and flows through glow/ripple/bottom-fade untouched since they all read `restOpacity`
+  downstream. Static for now (computed at build time, rebuilt on resize/prop change, like
+  `opacityRange`); `clusterMask(gx, gy)` is structured as the single place a time term would go if
+  animated drift is added later — deliberately not built yet.
+  - Verified live via `agent-browser` screenshots: organic blobs with real gaps (not scattered
+    single dots), `clusterEdge` visibly sharp vs feathered, `clusterSeed` reshuffling the layout.
+- **Distribution decision (not executed)**: reuse across the user's other projects will go through
+  a **private git dependency** (git URL + tag, `prepare` script runs the `tsup` build on install),
+  not `npm link`/`file:` (machine-local, breaks for other checkouts/CI) or GitHub Packages (needs
+  `.npmrc` auth tokens everywhere). Chosen specifically because it's a strict subset of the
+  existing `PACKAGING.md` npm-publish steps — going public later is just adding `npm publish` on
+  top of the same build, no rework. Documented in `PACKAGING.md` under "Interim distribution:
+  private git dependency". **Deferred** — build it only when explicitly asked (per this project's
+  packaging rule).
+
 ## Possible next steps (nothing committed to)
-- **Rename `hoverColors` → `glow`**: user mused "glow was probably the right name, but we can change that later." A rename would touch `types.ts`, `core.ts` (`hover0/hover1/hoverColors/hoverRadius/hoverAnimate/hoverSpeed`), `App.tsx` DialKit folder, and `PACKAGING.md`. Not started.
 - **npm packaging**: fully documented in `PACKAGING.md` (tsup config, package.json exports/peerDeps, README, LICENSE, `npm pack`, publish). Explicitly deferred — was always a documented "next milestone," not to be executed without a go-ahead.
+- **Private git dependency setup** (steps 1–3 of `PACKAGING.md` + a `prepare` script) — decided this session as the reuse path, not yet executed; do only when asked.
+- **Custom SVG glow shape** (single shape, no morph) — deferred this session, see above.
+- **Granular per-property breathe knobs** (`glowBreatheRadiusDepth` etc.) — only if the single coupled `glowAnimateDepth` ratio proves too rigid in practice.
+- **Animated cluster drift** — `clusterMask(gx, gy)` is structured to take a time term later; not built.
 - Possible future extensions noted as out-of-scope: two-colour ripple gradient, ripple alpha/brightness boost, multi-ring ripple oscillation, Vue/vanilla adapters, touch drag support, the Stitch "aurora" glow layer.
 
 ## Working style notes (from this user)

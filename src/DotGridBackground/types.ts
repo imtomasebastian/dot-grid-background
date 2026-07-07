@@ -46,30 +46,53 @@ export interface DotGridOptions {
   opacityRange?: number
 
   /**
-   * Two colours [start, end] that dots oscillate between when the
-   * cursor is nearby, creating a two-tone swirl effect.
-   * When omitted, pushed dots keep their baseColor (no colour shift, no dim).
-   * Example: ['#5656F0', '#40D9C6']
+   * Colour the cursor's glow region tints dots toward, soft-edged (no hard
+   * cutoff). When omitted, the glow is disabled entirely (no colour shift).
+   * Example: '#5656F0'
    */
-  hoverColors?: [string, string]
+  glowColor?: string
 
   /**
-   * Radius (px) of the hover-colour zone, independent of influenceRadius.
+   * Radius (px) of the glow zone, independent of influenceRadius.
    * When omitted, defaults to influenceRadius so colour reach matches push reach.
    */
-  hoverRadius?: number
+  glowRadius?: number
 
   /**
-   * Whether the two-tone colour pattern animates over time.
-   * false = pattern is frozen (varies by angle only, no shimmer). Default: true
+   * Peak tint strength at the centre of the glow (0–1).
+   * 0 = no colour; 1 = full tint at the core. Default: 1
    */
-  hoverAnimate?: boolean
+  glowIntensity?: number
 
   /**
-   * Speed of the colour-pattern rotation (units: radians per millisecond × 1000).
-   * Only used when hoverAnimate is true. Default: 0.0024
+   * Fraction (0–1) of glowRadius that feathers into the background.
+   * 0 = solid tint all the way to glowRadius, then a hard cutoff.
+   * 1 = the tint feathers across the entire radius (softest dome).
+   * Default: 0.33 (solid core, outer third feathers).
    */
-  hoverSpeed?: number
+  glowSoftness?: number
+
+  /**
+   * Animate the glow over time. `'none'` = static glow (default).
+   * `'pulse'` = glowIntensity breathes up and down, radius/softness fixed.
+   * `'breathe'` = watchOS-Breathe-style: radius and intensity contract
+   * together while softness rises (fades out), then expand back with
+   * softness falling (fades in) — one coupled motion, see `glowAnimateDepth`.
+   * Default: 'none'
+   */
+  glowAnimation?: 'none' | 'pulse' | 'breathe'
+
+  /**
+   * How deep the glow animation swings (0–1). 0 = static regardless of
+   * glowAnimation. Default: 0.3
+   */
+  glowAnimateDepth?: number
+
+  /**
+   * Speed of the glow animation (units: radians per millisecond).
+   * Only visible when glowAnimateDepth > 0. Default: 0.0014 (~one cycle / 4.5s)
+   */
+  glowAnimateSpeed?: number
 
   /**
    * Fade dots out toward the bottom edge of the canvas.
@@ -128,11 +151,44 @@ export interface DotGridOptions {
    */
   rippleGroup?: string
 
+  // --- Clustered coverage ---
+
+  /**
+   * Enable clustered coverage: instead of a uniform field, dots are masked
+   * into organic blobs with gaps between them (Perlin-noise threshold mask,
+   * computed once at grid build). Default: false
+   */
+  clusterEnabled?: boolean
+
+  /**
+   * Approximate blob size (px-ish scale) — bigger = larger clusters.
+   * Default: 400
+   */
+  clusterSize?: number
+
+  /**
+   * Roughly the fraction (0–1) of the area covered by clusters. Approximate,
+   * not exact — Perlin values aren't uniformly distributed. Default: 0.4
+   */
+  clusterCoverage?: number
+
+  /**
+   * Edge softness of each blob (0–1). 0 = sharp cutoff, 1 = soft feather.
+   * Default: 0.3
+   */
+  clusterEdge?: number
+
+  /**
+   * Integer seed — changes the cluster layout. Same seed always reproduces
+   * the same arrangement. Default: 0
+   */
+  clusterSeed?: number
+
   /**
    * How the grid reacts to the cursor (push + hover/glow — both are driven
    * by the same cursor position, so they travel together).
    * `'global'` (default) = follow the page cursor anywhere, bounded by
-   * influenceRadius/hoverRadius — several grids read as one continuous
+   * influenceRadius/glowRadius — several grids read as one continuous
    * field, and far-apart grids stay calm on their own since the cursor is
    * out of reach.
    * `'hover'` = react only while the cursor is over this grid — right for
@@ -156,10 +212,13 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   baseColor: '#444',
   baseOpacity: 1,
   opacityRange: 0,
-  hoverColors: undefined as unknown as [string, string], // optional — see DotGridOptions
-  hoverRadius: 725,
-  hoverAnimate: true,
-  hoverSpeed: 0.0024,
+  glowColor: undefined as unknown as string, // optional — see DotGridOptions
+  glowRadius: 725,
+  glowIntensity: 1,
+  glowSoftness: 0.33,
+  glowAnimation: 'none',
+  glowAnimateDepth: 0.3,
+  glowAnimateSpeed: 0.0014,
   bottomFade: true,
   rippleEnabled: true,
   rippleSpeed: 0.5,
@@ -169,13 +228,18 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   rippleColor: undefined as unknown as string, // optional — see DotGridOptions
   rippleColorIntensity: 1,
   rippleGroup: undefined as unknown as string, // optional — see DotGridOptions
+  clusterEnabled: false,
+  clusterSize: 400,
+  clusterCoverage: 0.4,
+  clusterEdge: 0.3,
+  clusterSeed: 0,
   cursorTracking: 'global',
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {
   const merged = { ...DEFAULTS, ...opts }
-  // hoverRadius defaults to influenceRadius when not explicitly set
-  if (opts.hoverRadius === undefined) merged.hoverRadius = merged.influenceRadius
+  // glowRadius defaults to influenceRadius when not explicitly set
+  if (opts.glowRadius === undefined) merged.glowRadius = merged.influenceRadius
   return merged
 }
 
