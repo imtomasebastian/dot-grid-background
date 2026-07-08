@@ -1,3 +1,21 @@
 node_modules
 dist
 *.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/*
+!.vscode/extensions.json
+.idea
+
+# Logs
+npm-debug.log*
+*.log
+
+# Env
+.env
+.env.*
+!.env.example
