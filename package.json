@@ -1,6 +1,6 @@
 {
   "name": "dot-grid-background",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Interactive animated dot-grid canvas background — cursor push/glow, click ripples, organic drift. Framework-agnostic core + React wrapper.",
   "type": "module",
   "license": "MIT",
