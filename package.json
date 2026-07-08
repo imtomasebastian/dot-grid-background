@@ -1,8 +1,19 @@
 {
   "name": "dot-grid-background",
-  "private": true,
   "version": "0.1.0",
+  "description": "Interactive animated dot-grid canvas background — cursor push/glow, click ripples, organic drift. Framework-agnostic core + React wrapper.",
   "type": "module",
+  "license": "MIT",
+  "author": "Tomas Sebastian",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/imtomasebastian/dot-grid-background.git"
+  },
+  "homepage": "https://github.com/imtomasebastian/dot-grid-background#readme",
+  "bugs": {
+    "url": "https://github.com/imtomasebastian/dot-grid-background/issues"
+  },
+  "keywords": ["canvas", "background", "animation", "react", "dot-grid"],
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
