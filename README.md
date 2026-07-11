@@ -1,9 +1,8 @@
 # dot-grid-background
 
 An interactive, animated dot-grid canvas background — cursor push/glow, click ripples, organic
-Perlin drift, and optional clustered coverage. Framework-agnostic core with a thin React wrapper.
-
-Reverse-engineered from the background effect on [stitch.withgoogle.com](https://stitch.withgoogle.com).
+Perlin drift, optional clustered coverage, and configurable shapes (dot, square, triangle, line)
+with rotation and size variation. Framework-agnostic core with a thin React wrapper.
 
 ## Install
 
