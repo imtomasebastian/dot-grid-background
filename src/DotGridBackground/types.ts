@@ -6,8 +6,54 @@ export interface DotGridOptions {
   /** Pixels between dots on the grid. Default: 16 */
   gridSpacing?: number
 
-  /** Dot radius in pixels. Default: 1 */
-  dotRadius?: number
+  /**
+   * Which shape to draw at each grid point. `'line'` is drawn as a stroked
+   * segment (see `lineWidth`); the others are solid fills. Default: 'dot'
+   */
+  shape?: 'dot' | 'square' | 'triangle' | 'line'
+
+  /**
+   * Shape size — the full extent in pixels (diameter for `dot`, side length
+   * for `square`, circumscribed diameter for `triangle`, length for `line`).
+   * Default: 2
+   */
+  shapeSize?: number
+
+  /**
+   * Random per-dot size reduction, 0–1. `0` = every shape at full `shapeSize`.
+   * `0.5` = each dot's size randomly reduced by up to 50%. Frozen per dot when
+   * the grid is built (like `opacityRange`); regenerated on resize.
+   * Default: 0
+   */
+  shapeSizeRange?: number
+
+  /**
+   * Global static rotation, in degrees. Applied to every shape; a no-op for
+   * `'dot'` (a rotated circle is identical). Default: 0
+   */
+  shapeRotation?: number
+
+  /**
+   * Per-dot rotation randomness mode, layered on top of `shapeRotation`.
+   * `'none'` = every dot shares the same rotation.
+   * `'jitter'` = each dot rotates by `shapeRotation ± random(0…shapeRotationAmount)`
+   * (continuous scatter).
+   * `'steps'` = each dot snaps to `shapeRotation + k × shapeRotationAmount` for a
+   * random integer `k` (e.g. `shapeRotationAmount: 45` ⇒ only 0/45/90/…/315°).
+   * Frozen per dot at grid build, like `shapeSizeRange`. No-op for `'dot'`.
+   * Default: 'none'
+   */
+  shapeRotationRandom?: 'none' | 'jitter' | 'steps'
+
+  /**
+   * Degrees used by `shapeRotationRandom` — max deviation for `'jitter'`, step
+   * size for `'steps'`. Ignored when `shapeRotationRandom` is `'none'`.
+   * Default: 0
+   */
+  shapeRotationAmount?: number
+
+  /** Stroke width (px) for the `'line'` shape. No-op for other shapes. Default: 1 */
+  lineWidth?: number
 
   /** How far (px) the cursor's influence reaches. Default: 725 */
   influenceRadius?: number
@@ -202,7 +248,13 @@ export interface ResolvedDotGridOptions extends Required<DotGridOptions> {}
 
 export const DEFAULTS: ResolvedDotGridOptions = {
   gridSpacing: 16,
-  dotRadius: 1,
+  shape: 'dot',
+  shapeSize: 2,
+  shapeSizeRange: 0,
+  shapeRotation: 0,
+  shapeRotationRandom: 'none',
+  shapeRotationAmount: 0,
+  lineWidth: 1,
   influenceRadius: 725,
   maxPush: 28,
   returnSpeed: 0.035,

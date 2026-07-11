@@ -180,10 +180,56 @@ not a uniform field). Resolved via a `/grill-me` session — see
     createDotGrid } from 'dot-grid-background/core'` resolves and works; `grep` confirmed
     `dist/core.js` has zero `react` references. Tagged `v0.1.1`.
 
+## Shapes, rotation & size randomness — done this session
+
+Added shape choice, static rotation (+ randomness), and size randomness, all decided via a
+`/grilling` session (see `~/.claude/plans/drifting-swimming-owl.md` for the full decision log).
+
+- **`shape: 'dot' | 'square' | 'triangle' | 'line'`** (default `'dot'`) — shape is purely a
+  draw-time concern. Push/noise/glow/ripple/opacity all operate on `dot.x`/`dot.y` unchanged;
+  only the final paint at the end of the per-dot loop in `core.ts` branches on shape. `dot` is
+  filled via `arc()` (unchanged behaviour); `square`/`triangle` are filled polygons; `line` is a
+  stroked segment (`lineWidth` controls stroke width, no-op for other shapes).
+- **`dotRadius` renamed to `shapeSize`** (pre-release clean break) — discoverability over
+  precision; `dotRadius` read oddly once triangles/lines exist. `shapeSize` uses **full-extent**
+  semantics (px across — diameter/side/length), not radius, so the number reads the same
+  regardless of shape. Default `2` (visually identical to the old `dotRadius: 1`).
+- **`shapeSizeRange`** — per-dot random size reduction (0–1), mirrors `opacityRange` exactly:
+  frozen at grid build, doesn't shimmer.
+- **Rotation is static, not animated** — a "spinning" mode was explicitly ruled out. This let
+  rotation be precomputed once per dot at grid build (`buildShapeVerts()` returns rotated vertex
+  *offsets* relative to the dot's position), so the hot draw loop only adds — no per-frame trig
+  or `ctx.save/rotate/restore`, same cost as drawing a plain dot.
+  - **`shapeRotation`** (degrees, default `0`) — global static angle. No-op for `'dot'`.
+  - **`shapeRotationRandom: 'none' | 'jitter' | 'steps'`** (default `'none'`) + shared
+    **`shapeRotationAmount`** (degrees) — mirrors the `glowAnimation` mode-enum-with-shared-knobs
+    pattern. `'jitter'` = continuous scatter (`base ± random(0…amount)`); `'steps'` = snaps to
+    `base + k × amount` for random integer `k` (e.g. `amount: 45` ⇒ only 0/45/90/…/315°).
+- **No engine clamp** of `shapeSize` against `gridSpacing` — shape overlap is a valid deliberate
+  look; the DialKit demo slider `max` is the only guardrail (kept unbounded in the prop itself).
+- **Line geometry**: length = `shapeSize` (no special-cased fixed length), canonically
+  **horizontal** at `shapeRotation = 0` — the demo's bottom-left→top-right 45° look is just a
+  demo default (`shape.rotation` DialKit default), not baked into the shape itself.
+- **Deferred, not built**: live rotation animation (spin), rounded corners, outlined/stroke-only
+  squares & triangles. All clean future additions — the "steps" rotation mode combined with a
+  polygon's own symmetry (e.g. a square at 90°-multiples) is expected and not treated as a bug.
+- **DialKit-in-package question resolved as a hard no** (same rule as React/zero-dep) — a
+  "ship a DialKit config preset" idea was explored and rejected: it'd be a third public entry
+  point serving only a minority of consumers, and would put DialKit-flavored data inside
+  `src/DotGridBackground/`, which the whole architecture fights to keep pure. Landed on:
+  DialKit guidance (if ever written) belongs only in the README as a copy-paste block — nothing
+  shipped in the package.
+- Demo (`App.tsx`): `gridSpacing` slider max lowered `60 → 48`; new `shape` DialKit folder
+  (`type`, `rotation`, `rotationMode`, `rotationAmount`, `sizeRange`, `lineWidth`); `dots.dotRadius`
+  renamed to `dots.shapeSize` (range `[2, 1, 32]`).
+- Verified: `npx tsc -p tsconfig.app.json --noEmit` passes clean. Core confirmed still
+  zero-dependency (no new imports beyond `perlin`/`types` in `core.ts`).
+
 ## Possible next steps (nothing committed to)
 - **npm packaging**: `PACKAGING.md` steps 4–8 remain (README, LICENSE, `npm pack` local test, flip `private` to `false`, `npm publish`). Explicitly deferred — do only when asked.
 - **Consume in another project**: add `"dot-grid-background": "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"` to that project's `package.json` and `npm install`. Bump the `#vX.Y.Z` tag (new tag pushed from this repo) to pick up updates.
 - **Custom SVG glow shape** (single shape, no morph) — deferred this session, see above.
+- **Live shape rotation animation (spin), rounded shape corners, outlined/stroke-only square & triangle** — all deferred this session, see above.
 - **Granular per-property breathe knobs** (`glowBreatheRadiusDepth` etc.) — only if the single coupled `glowAnimateDepth` ratio proves too rigid in practice.
 - **Animated cluster drift** — `clusterMask(gx, gy)` is structured to take a time term later; not built.
 - Possible future extensions noted as out-of-scope: two-colour ripple gradient, ripple alpha/brightness boost, multi-ring ripple oscillation, Vue/vanilla adapters, touch drag support, the Stitch "aurora" glow layer.

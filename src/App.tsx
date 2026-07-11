@@ -5,12 +5,20 @@ export default function App() {
   const p = useDialKit('Dot Grid', {
     background: '#111111',
     dots: {
-      gridSpacing:  [16, 6, 60] as [number, number, number],
-      dotRadius:    [1, 0.5, 6] as [number, number, number],
+      gridSpacing:  [16, 6, 48] as [number, number, number],
+      shapeSize:    [2, 1, 32] as [number, number, number],
       baseColor:    '#444444',
       baseOpacity:  [1, 0, 1] as [number, number, number],
       opacityRange: [0, 0, 1] as [number, number, number],
       bottomFade:   false,
+    },
+    shape: {
+      type:           { type: 'select', options: ['dot', 'square', 'triangle', 'line'], default: 'dot' } as const,
+      rotation:       [0, 0, 360, 1] as [number, number, number, number],
+      rotationMode:   { type: 'select', options: ['none', 'jitter', 'steps'], default: 'none' } as const,
+      rotationAmount: [0, 0, 180, 1] as [number, number, number, number],
+      sizeRange:      [0, 0, 1, 0.01] as [number, number, number, number],
+      lineWidth:      [1, 0.5, 6, 0.5] as [number, number, number, number],
     },
     cursor: {
       influenceRadius: [730, 50, 1200] as [number, number, number],
@@ -63,11 +71,17 @@ export default function App() {
     <div style={{ position: 'relative', minHeight: '100vh', background: p.background }}>
       <DotGridBackground
         gridSpacing={p.dots.gridSpacing}
-        dotRadius={p.dots.dotRadius}
+        shapeSize={p.dots.shapeSize}
         baseColor={p.dots.baseColor}
         baseOpacity={p.dots.baseOpacity}
         opacityRange={p.dots.opacityRange}
         bottomFade={p.dots.bottomFade}
+        shape={p.shape.type as 'dot' | 'square' | 'triangle' | 'line'}
+        shapeRotation={p.shape.rotation}
+        shapeRotationRandom={p.shape.rotationMode as 'none' | 'jitter' | 'steps'}
+        shapeRotationAmount={p.shape.rotationAmount}
+        shapeSizeRange={p.shape.sizeRange}
+        lineWidth={p.shape.lineWidth}
         influenceRadius={p.cursor.influenceRadius}
         maxPush={p.cursor.maxPush}
         returnSpeed={p.cursor.returnSpeed}

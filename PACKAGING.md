@@ -59,7 +59,50 @@ Every `requestAnimationFrame`, for each dot on the grid:
      (`glowBreatheRadiusDepth`, etc.) instead of the shared `glowAnimateDepth`.
    - Mix toward `glowColor` by `colorInfluence × effIntensity` (no alpha dimming — the tint itself
      is the highlight)
-7. **Draw** — `ctx.arc(x, y, dotRadius, 0, 2π)` filled with `rgba(r,g,b,alpha)`.
+7. **Draw** — shape-dependent (see "Shapes" below); colour/alpha math above is shared by all shapes.
+
+### Shapes (`shape`, `shapeSize`, `shapeRotation*`, `lineWidth`)
+
+Shape is purely a draw-time concern — push, noise, glow, ripple, and opacity all operate on a
+dot's *position*, so none of that math changes when the shape changes. Only the final paint at
+the end of the per-dot loop branches on `shape`:
+
+- `'dot'` — unchanged: `ctx.arc(x, y, radius, 0, 2π)` filled.
+- `'square'` / `'triangle'` — filled polygon via `moveTo`/`lineTo` over precomputed vertex offsets.
+- `'line'` — stroked segment (`ctx.lineWidth`, `ctx.stroke()`) between two precomputed endpoint
+  offsets.
+
+Size and rotation are **static and frozen per dot at grid build time** (like `opacityRange`), not
+recomputed every frame:
+
+```
+sizeMult   = 1 − Math.random() × shapeSizeRange
+halfExtent = (shapeSize / 2) × sizeMult          // full-extent semantics: shapeSize is px across
+angleDeg   = shapeRotation, adjusted by shapeRotationRandom:
+  'none'   → shapeRotation
+  'jitter' → shapeRotation ± random(0…shapeRotationAmount)     // continuous scatter
+  'steps'  → shapeRotation + k × shapeRotationAmount, k = random integer
+                                                                // (e.g. amount 45 ⇒ only 0/45/90/…)
+verts = buildShapeVerts(shape, halfExtent, angleDeg)  // rotated offsets relative to (dot.x, dot.y)
+```
+
+`buildShapeVerts` returns rotated corner/endpoint offsets — a square's 4 corners, a triangle's 3
+(circumradius = `halfExtent`, canonical point-up), or a line's 2 endpoints (canonical horizontal at
+`shapeRotation = 0`). Because everything is precomputed once, the per-frame draw loop only adds
+these frozen offsets to the dot's current `(x, y)` — no trig, no `ctx.save/rotate/restore` per
+frame, so drawing a rotated square is exactly as cheap as drawing a dot.
+
+`shapeSize` uses full-extent semantics (diameter/side/length, not radius) so the number reads as
+"how many px across" regardless of shape — a `shapeSize: 4` line is a 4px line. There's no engine
+clamp against `gridSpacing`; shapes overlapping into each other is a valid deliberate look, not
+something the engine second-guesses — the DialKit demo just picks a sane slider `max` as a
+guardrail.
+
+`lineWidth` is the one draw-time-only prop (stroke width for `'line'`) — it doesn't affect
+geometry, so changing it doesn't trigger a grid rebuild.
+
+Deferred (not built): live rotation animation (spin), rounded corners, and outlined (stroke-only)
+squares/triangles — all clean future additions if wanted, not needed for this round.
 
 ### Click ripple
 
@@ -193,7 +236,13 @@ not just architected that way internally:
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `gridSpacing` | `number` | `16` | px between dots |
-| `dotRadius` | `number` | `1` | dot radius (px) |
+| `shape` | `'dot' \| 'square' \| 'triangle' \| 'line'` | `'dot'` | shape drawn at each grid point |
+| `shapeSize` | `number` | `2` | full extent (px) — diameter/side/length depending on `shape` |
+| `shapeSizeRange` | `number` | `0` | per-dot random size reduction (0–1, 0 = uniform) |
+| `shapeRotation` | `number` | `0` | global static rotation (degrees); no-op for `'dot'` |
+| `shapeRotationRandom` | `'none' \| 'jitter' \| 'steps'` | `'none'` | per-dot rotation randomness mode; no-op for `'dot'` |
+| `shapeRotationAmount` | `number` | `0` | degrees used by `shapeRotationRandom` (max jitter, or step size) |
+| `lineWidth` | `number` | `1` | stroke width (px) for the `'line'` shape |
 | `influenceRadius` | `number` | `725` | cursor reach (px) |
 | `maxPush` | `number` | `28` | max repel displacement |
 | `returnSpeed` | `number` | `0.035` | ease-back per frame (0–1) |

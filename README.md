@@ -51,12 +51,64 @@ grid.destroy()
 
 The `./core` entry ships as its own bundle with no `react` import anywhere in it.
 
+### Tuning with DialKit (optional)
+
+`dot-grid-background` ships with no UI for tweaking props — that's on purpose, so the
+package stays dependency-free. If you want a live control panel while you dial in values,
+[DialKit](https://github.com/joshpuckett/dialkit) is a good fit: it turns a plain config
+object into sliders/selects and gives you back the current values, no wiring required.
+
+```bash
+npm install dialkit
+```
+
+```tsx
+import { useDialKit } from 'dialkit'
+import { DotGridBackground } from 'dot-grid-background'
+
+export function Hero() {
+  const p = useDialKit('Dot Grid', {
+    gridSpacing: [16, 6, 48] as [number, number, number],
+    shapeSize: [2, 1, 32] as [number, number, number],
+    shape: { type: 'select', options: ['dot', 'square', 'triangle', 'line'], default: 'dot' } as const,
+    influenceRadius: [725, 50, 1200] as [number, number, number],
+    maxPush: [28, 0, 120] as [number, number, number],
+  })
+
+  return (
+    <div style={{ position: 'relative', height: '100vh' }}>
+      <DotGridBackground
+        gridSpacing={p.gridSpacing}
+        shapeSize={p.shapeSize}
+        shape={p.shape as 'dot' | 'square' | 'triangle' | 'line'}
+        influenceRadius={p.influenceRadius}
+        maxPush={p.maxPush}
+        style={{ position: 'absolute', inset: 0 }}
+      />
+    </div>
+  )
+}
+```
+
+Add one entry per prop you want to tune — `[default, min, max, step?]` for numeric sliders,
+`{ type: 'select', options: [...], default: '...' } as const` for string enums (`shape`,
+`shapeRotationRandom`, `glowAnimation`, `cursorTracking`). This is dev tooling, not something
+`dot-grid-background` depends on or ships — remove the DialKit panel and hardcode the values
+you land on before shipping to production. See [`src/App.tsx`](./src/App.tsx) in this repo for
+the full config this demo uses, covering every prop.
+
 ## Props
 
 | Prop | Type | Default | Description |
 |---|---|---|---|
 | `gridSpacing` | `number` | `16` | px between dots |
-| `dotRadius` | `number` | `1` | dot radius (px) |
+| `shape` | `'dot' \| 'square' \| 'triangle' \| 'line'` | `'dot'` | shape drawn at each grid point |
+| `shapeSize` | `number` | `2` | full extent (px) — diameter/side/length depending on `shape` |
+| `shapeSizeRange` | `number` | `0` | per-dot random size reduction (0–1, 0 = uniform) |
+| `shapeRotation` | `number` | `0` | global static rotation (degrees); no-op for `'dot'` |
+| `shapeRotationRandom` | `'none' \| 'jitter' \| 'steps'` | `'none'` | per-dot rotation randomness mode; no-op for `'dot'` |
+| `shapeRotationAmount` | `number` | `0` | degrees used by `shapeRotationRandom` (max jitter, or step size) |
+| `lineWidth` | `number` | `1` | stroke width (px) for the `'line'` shape |
 | `influenceRadius` | `number` | `725` | cursor reach (px) |
 | `maxPush` | `number` | `28` | max repel displacement |
 | `returnSpeed` | `number` | `0.035` | ease-back per frame (0–1) |

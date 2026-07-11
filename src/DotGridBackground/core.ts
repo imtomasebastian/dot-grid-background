@@ -22,6 +22,15 @@ interface Dot {
   y: number
   /** Per-dot rest opacity multiplier (1 when opacityRange = 0) */
   restOpacity: number
+  /** Precomputed radius for the 'dot' shape (shapeSize/2, scaled by shapeSizeRange) */
+  radius: number
+  /**
+   * Precomputed, rotated vertex/endpoint offsets relative to the dot's center,
+   * for 'square' | 'triangle' | 'line'. Empty for 'dot'. Frozen at grid build
+   * (shape/size/rotation are all static), so the draw loop only adds — no
+   * per-frame trig or canvas transforms.
+   */
+  verts: Array<[number, number]>
 }
 
 interface MousePos {
@@ -86,8 +95,60 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     return smoothstep(threshold - band, threshold + band, n)
   }
 
+  // Rotated offsets for a shape, centered on the origin. Called once per dot
+  // at build time — 'dot' needs no vertices (drawn via arc + radius).
+  function buildShapeVerts(
+    shape: DotGridOptions['shape'],
+    halfExtent: number,
+    angleRad: number,
+  ): Array<[number, number]> {
+    const rotate = (x: number, y: number): [number, number] => {
+      const cos = Math.cos(angleRad)
+      const sin = Math.sin(angleRad)
+      return [x * cos - y * sin, x * sin + y * cos]
+    }
+
+    switch (shape) {
+      case 'square':
+        return [
+          rotate(-halfExtent, -halfExtent),
+          rotate(halfExtent, -halfExtent),
+          rotate(halfExtent, halfExtent),
+          rotate(-halfExtent, halfExtent),
+        ]
+      case 'triangle': {
+        // Upward equilateral triangle, circumradius = halfExtent, before rotation.
+        const cornerAngles = [-90, 30, 150]
+        return cornerAngles.map(deg => {
+          const a = (deg * Math.PI) / 180
+          return rotate(Math.cos(a) * halfExtent, Math.sin(a) * halfExtent)
+        })
+      }
+      case 'line':
+        // Canonically horizontal at angleRad = 0.
+        return [rotate(-halfExtent, 0), rotate(halfExtent, 0)]
+      default:
+        return []
+    }
+  }
+
+  // Per-dot static rotation (degrees), from shapeRotation + shapeRotationRandom.
+  function pickRotationDeg(): number {
+    const { shapeRotation, shapeRotationRandom, shapeRotationAmount } = opts
+    if (shapeRotationRandom === 'jitter') {
+      return shapeRotation + (Math.random() * 2 - 1) * shapeRotationAmount
+    }
+    if (shapeRotationRandom === 'steps') {
+      if (shapeRotationAmount <= 0) return shapeRotation
+      const count = Math.max(1, Math.round(360 / shapeRotationAmount))
+      const k = Math.floor(Math.random() * count)
+      return shapeRotation + k * shapeRotationAmount
+    }
+    return shapeRotation
+  }
+
   function buildGrid(w: number, h: number) {
-    const { gridSpacing, opacityRange, clusterEnabled } = opts
+    const { gridSpacing, opacityRange, clusterEnabled, shape, shapeSize, shapeSizeRange } = opts
     const cols = Math.ceil(w / gridSpacing) + 1
     const rows = Math.ceil(h / gridSpacing) + 1
     const next: Dot[] = []
@@ -97,7 +158,14 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         const gy = row * gridSpacing
         let restOpacity = 1 - Math.random() * opacityRange
         if (clusterEnabled) restOpacity *= clusterMask(gx, gy)
-        next.push({ gx, gy, x: gx, y: gy, restOpacity })
+
+        const sizeMult = Math.max(0, 1 - Math.random() * shapeSizeRange)
+        const halfExtent = (shapeSize / 2) * sizeMult
+        const angleRad = (pickRotationDeg() * Math.PI) / 180
+        const radius = halfExtent
+        const verts = buildShapeVerts(shape, halfExtent, angleRad)
+
+        next.push({ gx, gy, x: gx, y: gy, restOpacity, radius, verts })
       }
     }
     dots = next
@@ -109,7 +177,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    const { dotRadius, influenceRadius, maxPush, returnSpeed,
+    const { shape, lineWidth, influenceRadius, maxPush, returnSpeed,
             noiseAmplitude, noiseScale, noiseSpeed,
             baseColor, baseOpacity, glowColor, glowRadius, glowIntensity,
             glowSoftness, glowAnimation, glowAnimateDepth, glowAnimateSpeed,
@@ -156,6 +224,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     const bandCutoff = rippleWidth * 3
 
     ctx.clearRect(0, 0, canvasW, canvasH)
+    if (shape === 'line') ctx.lineWidth = lineWidth
 
     for (const dot of dots) {
       let targetX = dot.gx
@@ -266,10 +335,27 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
 
       if (alpha <= 0) continue
 
-      ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
-      ctx.beginPath()
-      ctx.arc(dot.x, dot.y, dotRadius, 0, Math.PI * 2)
-      ctx.fill()
+      // Colour math above is shared by every shape; only the final paint differs.
+      if (shape === 'line') {
+        const [[x1, y1], [x2, y2]] = dot.verts
+        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
+        ctx.beginPath()
+        ctx.moveTo(dot.x + x1, dot.y + y1)
+        ctx.lineTo(dot.x + x2, dot.y + y2)
+        ctx.stroke()
+      } else {
+        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
+        ctx.beginPath()
+        if (shape === 'dot') {
+          ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2)
+        } else {
+          const [[x0, y0], ...rest] = dot.verts
+          ctx.moveTo(dot.x + x0, dot.y + y0)
+          for (const [vx, vy] of rest) ctx.lineTo(dot.x + vx, dot.y + vy)
+          ctx.closePath()
+        }
+        ctx.fill()
+      }
     }
   }
 
@@ -393,8 +479,9 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       const prev = opts
       opts = resolveOptions({ ...prev, ...newOpts })
 
-      // Rebuild grid if spacing, opacityRange, or any cluster prop changed
-      // (all affect the build-time restOpacity of each dot)
+      // Rebuild grid if spacing, opacityRange, any cluster prop, or any shape/size/
+      // rotation prop changed (all affect the build-time geometry of each dot).
+      // lineWidth is draw-time only and doesn't need a rebuild.
       if (
         newOpts.gridSpacing !== undefined ||
         newOpts.opacityRange !== undefined ||
@@ -402,7 +489,13 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         newOpts.clusterSize !== undefined ||
         newOpts.clusterCoverage !== undefined ||
         newOpts.clusterEdge !== undefined ||
-        newOpts.clusterSeed !== undefined
+        newOpts.clusterSeed !== undefined ||
+        newOpts.shape !== undefined ||
+        newOpts.shapeSize !== undefined ||
+        newOpts.shapeSizeRange !== undefined ||
+        newOpts.shapeRotation !== undefined ||
+        newOpts.shapeRotationRandom !== undefined ||
+        newOpts.shapeRotationAmount !== undefined
       ) {
         buildGrid(canvasW, canvasH)
       }
