@@ -50,6 +50,32 @@ grid.destroy()
 
 The `./core` entry ships as its own bundle with no `react` import anywhere in it.
 
+### Aligning overlapping grids
+
+Set `pageAligned` and share the same `seed` + `gridSpacing` (and cluster/shape props) across
+instances, and they render as one continuous field — so a smaller grid can sit "inside" a larger
+one as a recoloured window onto the same dots. Spread a shared config object to keep them in sync:
+
+```tsx
+const field = {
+  gridSpacing: 40,
+  shape: 'dot' as const,
+  clusterEnabled: true,
+  clusterSize: 400,
+  opacityRange: 0.5,
+  shapeSizeRange: 0.3,
+  seed: 3,
+  pageAligned: true,
+}
+
+// Both draw the same field; only the colour differs. The inner grid's dots
+// line up with the outer grid's, and stay aligned across resize and scroll.
+<DotGridBackground {...field} baseColor="grey" />
+<DotGridBackground {...field} baseColor="lightblue" />
+```
+
+Without `pageAligned`, each grid anchors to its own top-left instead, so they stay independent.
+
 ### Tuning with DialKit (optional)
 
 `dot-grid-background` ships with no UI for tweaking props — that's on purpose, so the
@@ -137,7 +163,9 @@ the full config this demo uses, covering every prop.
 | `clusterSize` | `number` | `400` | approximate blob size (px-ish scale) — bigger = larger clusters |
 | `clusterCoverage` | `number` | `0.4` | roughly the fraction (0–1) of the area covered by clusters |
 | `clusterEdge` | `number` | `0.3` | blob edge softness (0 = sharp cutoff, 1 = soft feather) |
-| `clusterSeed` | `number` | `0` | integer seed — changes the cluster layout; same seed reproduces it |
+| `clusterSeed` | `number` | `0` | **Deprecated** — use `seed`. Still accepted (mapped to `seed` when `seed` is unset); removed next major |
+| `seed` | `number` | `0` | integer seed for all per-dot randomness (cluster layout, opacity, size, rotation); same seed reproduces the field |
+| `pageAligned` | `boolean` | `false` | anchor the lattice to page coords so grids sharing `seed` + `gridSpacing` read as one continuous field (overlap/stack); stays aligned across resize + scroll |
 | `cursorTracking` | `'hover' \| 'global'` | `'global'` | `'global'` follows the cursor anywhere (bounded by influenceRadius); `'hover'` reacts only when the cursor is over this instance |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |

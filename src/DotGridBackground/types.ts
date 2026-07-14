@@ -1,6 +1,6 @@
 /**
  * Options for the dot-grid effect.
- * All fields are optional — defaults match the original Stitch effect.
+ * All fields are optional — a sensible default is applied for every field.
  */
 export interface DotGridOptions {
   /** Pixels between dots on the grid. Default: 16 */
@@ -225,10 +225,34 @@ export interface DotGridOptions {
   clusterEdge?: number
 
   /**
-   * Integer seed — changes the cluster layout. Same seed always reproduces
-   * the same arrangement. Default: 0
+   * @deprecated Use `seed` instead — it now seeds the cluster layout together
+   * with all other per-dot randomness. `clusterSeed` is still accepted (mapped
+   * to `seed` when `seed` is not set) and will be removed in the next major.
    */
   clusterSeed?: number
+
+  // --- Randomness & positioning ---
+
+  /**
+   * Integer seed for all per-dot randomness: cluster layout, per-dot opacity
+   * (`opacityRange`), size (`shapeSizeRange`), and rotation
+   * (`shapeRotationRandom`). The same seed always reproduces the same field —
+   * two grids sharing a `seed` (and `gridSpacing`) render identical fields.
+   * Combine with `pageAligned` to make overlapping grids line up in space.
+   * Default: 0
+   */
+  seed?: number
+
+  /**
+   * Anchor the dot lattice to page/document coordinates instead of this
+   * element's own top-left. When `true`, two grids sharing `seed` +
+   * `gridSpacing` read as one continuous field — overlapping instances line up
+   * dot-for-dot, so a smaller grid can sit "inside" a larger one as a recoloured
+   * window onto the same field. Stays aligned across resizes and scroll.
+   * Default: false (element-local origin — each grid is self-contained and
+   * renders identically wherever it's placed).
+   */
+  pageAligned?: boolean
 
   /**
    * How the grid reacts to the cursor (push + hover/glow — both are driven
@@ -243,8 +267,13 @@ export interface DotGridOptions {
   cursorTracking?: 'hover' | 'global'
 }
 
-/** Resolved options with all defaults filled in. */
-export interface ResolvedDotGridOptions extends Required<DotGridOptions> {}
+/**
+ * Resolved options with all defaults filled in. `clusterSeed` is dropped — the
+ * deprecated alias is collapsed into `seed` by `resolveOptions()`, so the engine
+ * only ever reads `seed`.
+ */
+export interface ResolvedDotGridOptions
+  extends Required<Omit<DotGridOptions, 'clusterSeed'>> {}
 
 export const DEFAULTS: ResolvedDotGridOptions = {
   gridSpacing: 16,
@@ -284,12 +313,17 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   clusterSize: 400,
   clusterCoverage: 0.4,
   clusterEdge: 0.3,
-  clusterSeed: 0,
+  seed: 0,
+  pageAligned: false,
   cursorTracking: 'global',
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {
-  const merged = { ...DEFAULTS, ...opts }
+  const { clusterSeed, ...rest } = opts
+  const merged = { ...DEFAULTS, ...rest }
+  // Deprecated `clusterSeed` → `seed` alias — honoured only when `seed` was not
+  // set explicitly (an explicit `seed` always wins).
+  if (opts.seed === undefined && clusterSeed !== undefined) merged.seed = clusterSeed
   // glowRadius defaults to influenceRadius when not explicitly set
   if (opts.glowRadius === undefined) merged.glowRadius = merged.influenceRadius
   return merged

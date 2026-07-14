@@ -8,10 +8,9 @@ run yet — they are the next milestone.
 
 ## What was built
 
-A reusable interactive dot-grid canvas background, reverse-engineered from
-`stitch.withgoogle.com`. The project lives in `src/DotGridBackground/` and is structured
-as a **framework-agnostic core engine + thin React wrapper**, so only the wrapper needs to
-change when adding Vue/Svelte/vanilla-JS support later.
+A reusable interactive dot-grid canvas background. The project lives in
+`src/DotGridBackground/` and is structured as a **framework-agnostic core engine + thin React
+wrapper**, so only the wrapper needs to change when adding Vue/Svelte/vanilla-JS support later.
 
 ### Files
 
@@ -76,12 +75,12 @@ Size and rotation are **static and frozen per dot at grid build time** (like `op
 recomputed every frame:
 
 ```
-sizeMult   = 1 − Math.random() × shapeSizeRange
+sizeMult   = 1 − hash(wx, wy, seed) × shapeSizeRange
 halfExtent = (shapeSize / 2) × sizeMult          // full-extent semantics: shapeSize is px across
 angleDeg   = shapeRotation, adjusted by shapeRotationRandom:
   'none'   → shapeRotation
-  'jitter' → shapeRotation ± random(0…shapeRotationAmount)     // continuous scatter
-  'steps'  → shapeRotation + k × shapeRotationAmount, k = random integer
+  'jitter' → shapeRotation ± hash(0…shapeRotationAmount)       // continuous scatter
+  'steps'  → shapeRotation + k × shapeRotationAmount, k = hashed integer
                                                                 // (e.g. amount 45 ⇒ only 0/45/90/…)
 verts = buildShapeVerts(shape, halfExtent, angleDeg)  // rotated offsets relative to (dot.x, dot.y)
 ```
@@ -167,10 +166,11 @@ still needed a real channel — so the two were split into separate props instea
 
 ### opacityRange
 
-Each dot gets `restOpacity = 1 − Math.random() × opacityRange` when the grid is built.
-This is a one-time random value, so dots don't flicker — they just have varied resting
+Each dot gets `restOpacity = 1 − hash(wx, wy, seed) × opacityRange` when the grid is built.
+This is a one-time value per dot, so dots don't flicker — they just have varied resting
 brightnesses. It's applied as a multiplier before all other alpha operations, so bottom-fade
-composes on top cleanly.
+composes on top cleanly. The value comes from a deterministic position hash (not `Math.random`),
+so it's stable across rebuilds/resizes and reproducible from `seed` — see "Determinism & seeding".
 
 ### Clustered coverage (`clusterEnabled`)
 
@@ -180,23 +180,53 @@ static unless the grid rebuilds):
 
 ```
 freq = 1 / clusterSize
-n    = (noise2d(gx×freq + clusterSeed×1000, gy×freq + clusterSeed×1000) + 1) / 2   // → [0, 1]
+n    = (noise2d(gx×freq + seed×1000, gy×freq + seed×1000) + 1) / 2   // → [0, 1]
 threshold = 1 − clusterCoverage
 mask = clusterEdge <= 0
   ? (n >= threshold ? 1 : 0)                                    // hard cutoff
   : smoothstep(threshold − clusterEdge×0.5, threshold + clusterEdge×0.5, n)  // feathered
-restOpacity = (1 − Math.random() × opacityRange) × mask
+restOpacity = (1 − hash(gx, gy, seed) × opacityRange) × mask
 ```
 
 `clusterSize` reads as "bigger = larger blobs" (internally the inverse of noise frequency);
 `clusterCoverage` is roughly the fraction of area covered — approximate, not exact, since Perlin
 values aren't uniformly distributed; `clusterEdge` is 0 (sharp) to 1 (soft feather) at each blob's
-boundary; `clusterSeed` (integer) offsets the noise sample coordinates, so the same seed always
+boundary; `seed` (integer) offsets the noise sample coordinates, so the same seed always
 reproduces the same layout and changing it reshuffles. The mask multiplies onto `restOpacity`
 independently of `opacityRange`, so both stack — a dot inside a cluster can still get random rest-
 opacity dimming. Glow, ripple, and bottom-fade are untouched (they all read the same `restOpacity`
 downstream). Clusters are static today; the mask function takes only `(gx, gy)`, but is the single
 place a time term would go if animated drift is added later.
+
+### Determinism & seeding (`seed`, `pageAligned`)
+
+All per-dot randomness — cluster layout, `opacityRange`, `shapeSizeRange`, and
+`shapeRotationRandom` — comes from a deterministic hash `hash(x, y, seed, salt)` rather than
+`Math.random()`. The hash is an integer scramble (xxHash-style, no trig) returning `[0, 1)`; a
+per-channel `salt` (opacity / size / rotation) keeps the three streams decorrelated so a dim dot
+isn't also always the smallest. Two consequences:
+
+- **Stable across rebuilds.** A resize (or any prop change that rebuilds the grid) no longer
+  reshuffles the field — a dot's opacity/size/rotation is a function of its position + `seed`, not
+  of call order. `seed` is the single knob that reshuffles everything; the same seed always
+  reproduces the same field.
+- **`clusterSeed` → `seed`.** The old `clusterSeed` seeded only the cluster mask; `seed` now seeds
+  everything. `clusterSeed` is still accepted as a deprecated alias (mapped to `seed` when `seed`
+  is unset, in `resolveOptions()`), removed next major.
+
+**`pageAligned`** makes two grids render as one continuous field. Each dot has two coordinate roles
+that normally coincide but diverge when aligned:
+
+- **local** (`gx`/`gy`, where the dot is drawn on its own canvas) — phase-shifted by the fractional
+  page phase `((pageX % gridSpacing) + gridSpacing) % gridSpacing` so the visible lattice registers
+  with the global one;
+- **world** (`wx`/`wy`, the dot's page-space position = `getBoundingClientRect()` + `scrollX/Y`) —
+  fed to the cluster mask and the per-dot hash, so the same physical point yields the same dot in
+  every aligned grid.
+
+Both offsets are `0` when `pageAligned` is off, so a solo grid is byte-for-byte a local grid. Using
+page coords (not viewport) keeps alignment stable across scroll; the measurement is build-time only
+(mount / resize), so there's no per-frame or scroll-listener cost.
 
 ### HiDPI / resize
 
@@ -272,7 +302,9 @@ not just architected that way internally:
 | `clusterSize` | `number` | `400` | approximate blob size (px-ish scale) — bigger = larger clusters |
 | `clusterCoverage` | `number` | `0.4` | roughly the fraction (0–1) of the area covered by clusters |
 | `clusterEdge` | `number` | `0.3` | blob edge softness (0 = sharp cutoff, 1 = soft feather) |
-| `clusterSeed` | `number` | `0` | integer seed — changes the cluster layout; same seed reproduces it |
+| `clusterSeed` | `number` | `0` | **Deprecated** — use `seed`. Still accepted (mapped to `seed` when `seed` is unset); removed next major |
+| `seed` | `number` | `0` | integer seed for all per-dot randomness (cluster layout, opacity, size, rotation); same seed reproduces the field |
+| `pageAligned` | `boolean` | `false` | anchor the lattice to page coords so grids sharing `seed` + `gridSpacing` read as one continuous field (overlap/stack); stays aligned across resize + scroll |
 | `cursorTracking` | `'hover' \| 'global'` | `'global'` | `'global'` follows the cursor anywhere (bounded by influenceRadius); `'hover'` reacts only when the cursor is over this instance |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
@@ -461,7 +493,7 @@ npm publish --access public
 - **Vanilla JS adapter** — `createDotGrid(canvas, opts)` is already framework-agnostic.
   A vanilla usage example just needs wrapping in a `<script>` tag.
 - **Vue adapter** — a thin `<DotGridBackground>` SFC using `onMounted`/`onUnmounted`.
-- **Aurora layer** — the coloured curved glow from `stitch.withgoogle.com` is a separate
-  canvas layer (`auroraTunerConfig`) not included here. Could be added as a companion component.
+- **Aurora layer** — a coloured curved "aurora" glow could be drawn on a separate canvas layer,
+  not included here. Could be added as a companion component.
 - **Touch support** — currently mouse-only. `touchmove` could be added to `core.ts` for
   mobile interaction.

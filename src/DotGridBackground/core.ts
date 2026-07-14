@@ -14,9 +14,16 @@ import { noise2d } from './perlin'
 import { resolveOptions, parseColor, type DotGridOptions } from './types'
 
 interface Dot {
-  /** Grid (home) position */
+  /** Grid (home) position — local canvas coords, where the dot is drawn */
   gx: number
   gy: number
+  /**
+   * World (page-space) position. Equals gx/gy unless pageAligned is on. Used for
+   * anything that must match across aligned grids — currently the organic noise
+   * sample, so the cursor wobble stays locked between overlapping instances.
+   */
+  wx: number
+  wy: number
   /** Current animated position */
   x: number
   y: number
@@ -57,6 +64,27 @@ export interface DotGrid {
   destroy(): void
 }
 
+// Deterministic per-dot pseudo-random in [0, 1), a pure function of position +
+// seed (+ a per-channel salt so opacity/size/rotation are decorrelated). Replaces
+// Math.random() so a rebuild — or a second grid sharing seed + gridSpacing —
+// reproduces the exact same field. Integer scramble (xxHash-style), no trig;
+// coords are rounded so sub-pixel differences between aligned grids collapse to
+// the same value.
+function hash(x: number, y: number, seed: number, salt: number): number {
+  let h = Math.imul((Math.round(x) | 0) ^ 0x9e3779b9, 374761393)
+  h = Math.imul(h ^ (Math.round(y) | 0), 668265263)
+  h = Math.imul(h ^ (seed | 0), 1274126177)
+  h = Math.imul(h ^ (salt | 0), 2246822519)
+  h ^= h >>> 15
+  h = Math.imul(h, 2246822519)
+  h ^= h >>> 13
+  return (h >>> 0) / 4294967296
+}
+
+const SALT_OPACITY = 1
+const SALT_SIZE = 2
+const SALT_ROTATION = 3
+
 export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOptions = {}): DotGrid {
   let opts = resolveOptions(initialOpts)
   let dots: Dot[] = []
@@ -84,9 +112,9 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   // once per dot at build time (static clusters). If animated drift is added
   // later, this is the single place a time term would offset the sample.
   function clusterMask(gx: number, gy: number): number {
-    const { clusterSize, clusterCoverage, clusterEdge, clusterSeed } = opts
+    const { clusterSize, clusterCoverage, clusterEdge, seed } = opts
     const freq = 1 / clusterSize
-    const seedOffset = clusterSeed * 1000
+    const seedOffset = seed * 1000
     const v = noise2d(gx * freq + seedOffset, gy * freq + seedOffset) // ~[-1, 1]
     const n = (v + 1) / 2 // → [0, 1]
     const threshold = 1 - clusterCoverage
@@ -133,39 +161,67 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   }
 
   // Per-dot static rotation (degrees), from shapeRotation + shapeRotationRandom.
-  function pickRotationDeg(): number {
-    const { shapeRotation, shapeRotationRandom, shapeRotationAmount } = opts
+  // Randomness is a deterministic hash of the dot's world position + seed.
+  function pickRotationDeg(wx: number, wy: number): number {
+    const { shapeRotation, shapeRotationRandom, shapeRotationAmount, seed } = opts
     if (shapeRotationRandom === 'jitter') {
-      return shapeRotation + (Math.random() * 2 - 1) * shapeRotationAmount
+      return shapeRotation + (hash(wx, wy, seed, SALT_ROTATION) * 2 - 1) * shapeRotationAmount
     }
     if (shapeRotationRandom === 'steps') {
       if (shapeRotationAmount <= 0) return shapeRotation
       const count = Math.max(1, Math.round(360 / shapeRotationAmount))
-      const k = Math.floor(Math.random() * count)
+      const k = Math.floor(hash(wx, wy, seed, SALT_ROTATION) * count)
       return shapeRotation + k * shapeRotationAmount
     }
     return shapeRotation
   }
 
   function buildGrid(w: number, h: number) {
-    const { gridSpacing, opacityRange, clusterEnabled, shape, shapeSize, shapeSizeRange } = opts
-    const cols = Math.ceil(w / gridSpacing) + 1
-    const rows = Math.ceil(h / gridSpacing) + 1
+    const { gridSpacing, opacityRange, clusterEnabled, shape, shapeSize,
+            shapeSizeRange, seed, pageAligned } = opts
+
+    // Two coordinate roles diverge under pageAligned:
+    //  - local (gx/gy): where the dot is drawn on this canvas. Phase-shifted by
+    //    the fractional page phase so the visible lattice registers with the
+    //    global one.
+    //  - world (wx/wy): the dot's page-space position, used only to sample
+    //    cluster/opacity/size/rotation. Identical for the same point in every
+    //    aligned grid, so they render the same field.
+    // Both offsets are 0 when pageAligned is off → byte-for-byte the local grid.
+    let phaseX = 0, phaseY = 0, worldOffX = 0, worldOffY = 0
+    if (pageAligned) {
+      const rect = (canvas.parentElement ?? canvas).getBoundingClientRect()
+      const pageX = rect.left + window.scrollX
+      const pageY = rect.top + window.scrollY
+      phaseX = ((pageX % gridSpacing) + gridSpacing) % gridSpacing
+      phaseY = ((pageY % gridSpacing) + gridSpacing) % gridSpacing
+      worldOffX = pageX - phaseX // a whole number of cells
+      worldOffY = pageY - phaseY
+    }
+
+    // The phase shift pulls the lattice left/up by up to one cell, so cover one
+    // extra column/row when aligned to avoid a gap at the right/bottom edge.
+    const extra = pageAligned ? 2 : 1
+    const cols = Math.ceil(w / gridSpacing) + extra
+    const rows = Math.ceil(h / gridSpacing) + extra
     const next: Dot[] = []
     for (let row = 0; row < rows; row++) {
       for (let col = 0; col < cols; col++) {
-        const gx = col * gridSpacing
-        const gy = row * gridSpacing
-        let restOpacity = 1 - Math.random() * opacityRange
-        if (clusterEnabled) restOpacity *= clusterMask(gx, gy)
+        const gx = col * gridSpacing - phaseX
+        const gy = row * gridSpacing - phaseY
+        const wx = col * gridSpacing + worldOffX
+        const wy = row * gridSpacing + worldOffY
 
-        const sizeMult = Math.max(0, 1 - Math.random() * shapeSizeRange)
+        let restOpacity = 1 - hash(wx, wy, seed, SALT_OPACITY) * opacityRange
+        if (clusterEnabled) restOpacity *= clusterMask(wx, wy)
+
+        const sizeMult = Math.max(0, 1 - hash(wx, wy, seed, SALT_SIZE) * shapeSizeRange)
         const halfExtent = (shapeSize / 2) * sizeMult
-        const angleRad = (pickRotationDeg() * Math.PI) / 180
+        const angleRad = (pickRotationDeg(wx, wy) * Math.PI) / 180
         const radius = halfExtent
         const verts = buildShapeVerts(shape, halfExtent, angleRad)
 
-        next.push({ gx, gy, x: gx, y: gy, restOpacity, radius, verts })
+        next.push({ gx, gy, wx, wy, x: gx, y: gy, restOpacity, radius, verts })
       }
     }
     dots = next
@@ -248,9 +304,11 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
             targetX = dot.gx + nx * push
             targetY = dot.gy + ny * push
 
-            // Organic noise layered on top of the repel
-            const noiseX = noise2d(dot.gx * noiseScale, dot.gy * noiseScale + time)
-            const noiseY = noise2d(dot.gx * noiseScale + 100, dot.gy * noiseScale + time)
+            // Organic noise layered on top of the repel. Sampled from world
+            // coords so the wobble matches across pageAligned grids (wx/wy == gx/gy
+            // when alignment is off, so a solo grid is unchanged).
+            const noiseX = noise2d(dot.wx * noiseScale, dot.wy * noiseScale + time)
+            const noiseY = noise2d(dot.wx * noiseScale + 100, dot.wy * noiseScale + time)
             const noiseMag = influence * influence * noiseAmplitude
             targetX += noiseX * noiseMag
             targetY += noiseY * noiseMag
@@ -477,11 +535,19 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   return {
     update(newOpts: DotGridOptions) {
       const prev = opts
-      opts = resolveOptions({ ...prev, ...newOpts })
+      // Normalise the deprecated clusterSeed alias on the *raw* incoming opts
+      // before merging: prev already carries a resolved `seed`, which would
+      // otherwise mask a clusterSeed passed here.
+      const incoming: DotGridOptions = { ...newOpts }
+      if (incoming.seed === undefined && incoming.clusterSeed !== undefined) {
+        incoming.seed = incoming.clusterSeed
+      }
+      delete incoming.clusterSeed
+      opts = resolveOptions({ ...prev, ...incoming })
 
-      // Rebuild grid if spacing, opacityRange, any cluster prop, or any shape/size/
-      // rotation prop changed (all affect the build-time geometry of each dot).
-      // lineWidth is draw-time only and doesn't need a rebuild.
+      // Rebuild grid if spacing, opacityRange, any cluster prop, the seed, page
+      // alignment, or any shape/size/rotation prop changed (all affect the
+      // build-time geometry of each dot). lineWidth is draw-time only.
       if (
         newOpts.gridSpacing !== undefined ||
         newOpts.opacityRange !== undefined ||
@@ -489,7 +555,9 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         newOpts.clusterSize !== undefined ||
         newOpts.clusterCoverage !== undefined ||
         newOpts.clusterEdge !== undefined ||
+        newOpts.seed !== undefined ||
         newOpts.clusterSeed !== undefined ||
+        newOpts.pageAligned !== undefined ||
         newOpts.shape !== undefined ||
         newOpts.shapeSize !== undefined ||
         newOpts.shapeSizeRange !== undefined ||

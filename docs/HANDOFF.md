@@ -2,9 +2,9 @@
 
 ## What this project is
 
-An interactive animated **dot-grid canvas background**, reverse-engineered from
-`stitch.withgoogle.com`, built as a reusable React component intended for future npm
-publishing. Located at `/Users/tomas/Projects/playground` (Vite + React 19 + TypeScript).
+An interactive animated **dot-grid canvas background**, built as a reusable React component
+intended for future npm publishing. Located at `/Users/tomas/Projects/playground` (Vite +
+React 19 + TypeScript).
 
 Architecture: **framework-agnostic core engine + thin React wrapper**, so the core has zero
 runtime dependencies (a deliberate selling point). DialKit (live control panel) is used **only
@@ -225,6 +225,53 @@ Added shape choice, static rotation (+ randomness), and size randomness, all dec
 - Verified: `npx tsc -p tsconfig.app.json --noEmit` passes clean. Core confirmed still
   zero-dependency (no new imports beyond `perlin`/`types` in `core.ts`).
 
+## Cross-instance field alignment (`pageAligned`) + `seed` rename — done this session
+
+Goal: let two mounted grids render as windows onto the **same** underlying dot field, so a smaller
+recoloured grid can sit "inside" a larger one with dots that line up. Designed conversationally
+(full decision log: the session scratch file `pageAligned-design.md`; superseded research files
+`patternGroup-research.md` / `HANDOFF-patternGroup-research.md` kept only as history).
+
+- **`pageAligned?: boolean`** (default `false`, opt-in). `true` → the grid anchors its lattice to
+  **page/document coordinates** instead of its own top-left, so grids sharing `seed` + `gridSpacing`
+  read as one continuous field. Named for what it is (coordinate origin), not the pattern —
+  deliberately rejected `patternGroup`/a string group id (nothing needs cross-instance coordination;
+  alignment is emergent from both grids measuring themselves against the same frame). Chose opt-in
+  over default so a solo drop-in stays position-independent and each grid renders identically
+  wherever placed.
+- **Coordinate-role split in `buildGrid()`** (the crux): `gx`/`gy` now diverge into **local** draw
+  coords (phase-shifted by the fractional page phase so the visible lattice registers globally) and
+  **world** sample coords (`getBoundingClientRect() + scrollX/Y`, fed to the cluster mask + per-dot
+  hash). Both offsets `0` when `pageAligned` off → byte-for-byte the old local grid. Page coords (not
+  raw viewport rect) so alignment survives scroll; measurement is build-time only, zero per-frame
+  cost. One extra row/col of coverage when aligned (phase shift pulls the lattice up/left).
+- **Single deterministic RNG path** — removed `Math.random()` from `buildGrid()`/`pickRotationDeg()`
+  entirely, replaced with `hash(x, y, seed, salt)` (integer xxHash-style scramble, no trig, coords
+  rounded so sub-pixel differences between aligned grids collapse). Per-channel salts
+  (`SALT_OPACITY`/`SALT_SIZE`/`SALT_ROTATION`) decorrelate opacity/size/rotation. Two behaviour
+  changes: (+) resizes no longer reshuffle per-dot cosmetics (killed the flicker); (~) a one-time
+  arrangement change for grids using `opacityRange`/`shapeSizeRange`/random rotation — defaults
+  (ranges `0`) are pixel-identical.
+- **`clusterSeed` → `seed`** (renamed; now seeds cluster layout *and* all per-dot cosmetics *and* the
+  aligned-field identity). Kept as a **deprecated alias** (not a clean rename — ~650 weekly npm
+  downloads) mapped to `seed` in `resolveOptions()` when `seed` is unset; `seed` wins if both set.
+  `ResolvedDotGridOptions` drops `clusterSeed` (`Required<Omit<…, 'clusterSeed'>>`) so the engine
+  only reads `seed`. `update()` normalises the alias on the **raw `newOpts`** before merging (else
+  `prev.seed` masks it) and its rebuild-trigger watches both `seed` and `clusterSeed`.
+- **Demo (`App.tsx`)**: `seed` + `pageAligned` moved into the `dots` DialKit folder (seed removed
+  from `clusters`); render refactored to spread a shared `field` object into two grids (hero + a
+  centred overlay box with `baseColor="#5656F0"`), demonstrating the recommended consumer pattern —
+  toggle `dots.pageAligned` to watch the overlay's dots snap into / drift out of the field. Removed
+  the orphaned `groupDemoBoxA/B` styles (dead since the old sync demo was removed).
+- Docs updated: README props table + a new "Aligning overlapping grids" usage section; `PACKAGING.md`
+  props table + a new "Determinism & seeding" section + algorithm pseudo-code (`Math.random` → `hash`).
+- **Also this session (housekeeping):** removed all origin-attribution mentions of the tool this
+  effect was originally modelled on, across `types.ts`, `PACKAGING.md`, and this file, per user request.
+- Verification: `npx tsc -p tsconfig.app.json --noEmit` passes clean. Core confirmed still
+  zero-dependency (no new imports in `core.ts` beyond `perlin`/`types`). **Visual alignment not yet
+  eyeballed in the running demo** — the design flagged this needs the dev server + eyes (tsc won't
+  catch a phase-offset bug); run `npm run dev` and toggle `pageAligned` to confirm before shipping.
+
 ## Possible next steps (nothing committed to)
 - **npm packaging**: `PACKAGING.md` steps 4–8 remain (README, LICENSE, `npm pack` local test, flip `private` to `false`, `npm publish`). Explicitly deferred — do only when asked.
 - **Consume in another project**: add `"dot-grid-background": "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"` to that project's `package.json` and `npm install`. Bump the `#vX.Y.Z` tag (new tag pushed from this repo) to pick up updates.
@@ -232,7 +279,7 @@ Added shape choice, static rotation (+ randomness), and size randomness, all dec
 - **Live shape rotation animation (spin), rounded shape corners, outlined/stroke-only square & triangle** — all deferred this session, see above.
 - **Granular per-property breathe knobs** (`glowBreatheRadiusDepth` etc.) — only if the single coupled `glowAnimateDepth` ratio proves too rigid in practice.
 - **Animated cluster drift** — `clusterMask(gx, gy)` is structured to take a time term later; not built.
-- Possible future extensions noted as out-of-scope: two-colour ripple gradient, ripple alpha/brightness boost, multi-ring ripple oscillation, Vue/vanilla adapters, touch drag support, the Stitch "aurora" glow layer.
+- Possible future extensions noted as out-of-scope: two-colour ripple gradient, ripple alpha/brightness boost, multi-ring ripple oscillation, Vue/vanilla adapters, touch drag support, an "aurora" glow layer.
 
 ## Working style notes (from this user)
 - Iterative and hands-on — ships small changes, tests visually in the demo, then asks for the next tweak. Keep changes surgical.

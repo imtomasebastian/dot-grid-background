@@ -10,6 +10,8 @@ export default function App() {
       baseColor:    '#444444',
       baseOpacity:  [1, 0, 1] as [number, number, number],
       opacityRange: [0, 0, 1] as [number, number, number],
+      seed:         [0, 0, 20, 1] as [number, number, number, number],
+      pageAligned:  true,
       bottomFade:   false,
     },
     shape: {
@@ -55,7 +57,6 @@ export default function App() {
       size:     [400, 50, 1200] as [number, number, number],
       coverage: [0.4, 0, 1, 0.01] as [number, number, number, number],
       edge:     [0.3, 0, 1, 0.01] as [number, number, number, number],
-      seed:     [0, 0, 20, 1] as [number, number, number, number],
     },
     sync: {
       ripple: true,
@@ -67,57 +68,65 @@ export default function App() {
 
   const rippleColor = p.ripple.colorEnabled ? p.ripple.color : undefined
 
+  // Everything that defines the shared field (all but baseColor). Spreading the
+  // same object into two grids is the recommended way to make them line up:
+  // identical seed/gridSpacing/etc. + pageAligned → one continuous field.
+  const field = {
+    gridSpacing: p.dots.gridSpacing,
+    shapeSize: p.dots.shapeSize,
+    baseOpacity: p.dots.baseOpacity,
+    opacityRange: p.dots.opacityRange,
+    seed: p.dots.seed,
+    pageAligned: p.dots.pageAligned,
+    bottomFade: p.dots.bottomFade,
+    shape: p.shape.type as 'dot' | 'square' | 'triangle' | 'line',
+    shapeRotation: p.shape.rotation,
+    shapeRotationRandom: p.shape.rotationMode as 'none' | 'jitter' | 'steps',
+    shapeRotationAmount: p.shape.rotationAmount,
+    shapeSizeRange: p.shape.sizeRange,
+    lineWidth: p.shape.lineWidth,
+    influenceRadius: p.cursor.influenceRadius,
+    maxPush: p.cursor.maxPush,
+    returnSpeed: p.cursor.returnSpeed,
+    noiseAmplitude: p.noise.amplitude,
+    noiseScale: p.noise.scale,
+    noiseSpeed: p.noise.speed,
+    glowColor,
+    glowRadius: p.glow.radius,
+    glowIntensity: p.glow.intensity,
+    glowSoftness: p.glow.softness,
+    glowAnimation: p.glow.animation as 'none' | 'pulse' | 'breathe',
+    glowAnimateDepth: p.glow.animateDepth,
+    glowAnimateSpeed: p.glow.animateSpeed,
+    rippleEnabled: p.ripple.enabled,
+    rippleSpeed: p.ripple.speed,
+    rippleAmplitude: p.ripple.amplitude,
+    rippleWidth: p.ripple.width,
+    rippleMaxRadius: p.ripple.maxRadius,
+    rippleColor,
+    rippleColorIntensity: p.ripple.colorIntensity,
+    rippleGroup: 'test',
+    clusterEnabled: p.clusters.enabled,
+    clusterSize: p.clusters.size,
+    clusterCoverage: p.clusters.coverage,
+    clusterEdge: p.clusters.edge,
+  }
+
   return (
     <div style={{ position: 'relative', minHeight: '100vh', background: p.background }}>
-      <DotGridBackground
-        gridSpacing={p.dots.gridSpacing}
-        shapeSize={p.dots.shapeSize}
-        baseColor={p.dots.baseColor}
-        baseOpacity={p.dots.baseOpacity}
-        opacityRange={p.dots.opacityRange}
-        bottomFade={p.dots.bottomFade}
-        shape={p.shape.type as 'dot' | 'square' | 'triangle' | 'line'}
-        shapeRotation={p.shape.rotation}
-        shapeRotationRandom={p.shape.rotationMode as 'none' | 'jitter' | 'steps'}
-        shapeRotationAmount={p.shape.rotationAmount}
-        shapeSizeRange={p.shape.sizeRange}
-        lineWidth={p.shape.lineWidth}
-        influenceRadius={p.cursor.influenceRadius}
-        maxPush={p.cursor.maxPush}
-        returnSpeed={p.cursor.returnSpeed}
-        noiseAmplitude={p.noise.amplitude}
-        noiseScale={p.noise.scale}
-        noiseSpeed={p.noise.speed}
-        glowColor={glowColor}
-        glowRadius={p.glow.radius}
-        glowIntensity={p.glow.intensity}
-        glowSoftness={p.glow.softness}
-        glowAnimation={p.glow.animation as 'none' | 'pulse' | 'breathe'}
-        glowAnimateDepth={p.glow.animateDepth}
-        glowAnimateSpeed={p.glow.animateSpeed}
-        rippleEnabled={p.ripple.enabled}
-        rippleSpeed={p.ripple.speed}
-        rippleAmplitude={p.ripple.amplitude}
-        rippleWidth={p.ripple.width}
-        rippleMaxRadius={p.ripple.maxRadius}
-        rippleColor={rippleColor}
-        rippleColorIntensity={p.ripple.colorIntensity}
-        clusterEnabled={p.clusters.enabled}
-        clusterSize={p.clusters.size}
-        clusterCoverage={p.clusters.coverage}
-        clusterEdge={p.clusters.edge}
-        clusterSeed={p.clusters.seed}
-      />
+      <DotGridBackground {...field} baseColor={p.dots.baseColor} />
 
       <div style={styles.hero}>
         <h1 style={styles.heroTitle}>Dot Grid Background</h1>
         <p style={styles.heroSub}>Move your cursor around to interact with the dots.</p>
       </div>
 
-      {/* rippleGroup + cursorTracking demo: two separate grids. rippleGroup relays
-          clicks between them; cursorTracking="global" (vs "hover") makes the
-          push/glow field continuous across the gap instead of cutting out. */}
-
+      {/* pageAligned demo: a recoloured window onto the same field. With the same
+          `field` config + pageAligned, its blue dots continue the grey grid behind
+          it dot-for-dot. Toggle `dots.pageAligned` off to see them drift apart. */}
+      <div style={styles.overlayBox}>
+        <DotGridBackground {...field} baseColor="#5656F0" />
+      </div>
     </div>
   )
 }
@@ -146,23 +155,16 @@ const styles = {
     fontSize: 'clamp(0.9rem, 2vw, 1.2rem)',
     color: 'rgba(255,255,255,0.5)',
   },
-  groupDemoBoxA: {
-    position: 'absolute' as const,
-    top: 24,
-    left: 24,
-    width: 280,
-    height: 180,
-    border: '1px solid rgba(255,255,255,0.15)',
-  },
-  groupDemoBoxB: {
+  overlayBox: {
     // Offset below dead-center so it doesn't sit under the hero title/subtitle,
     // which occupy the exact vertical center via the flex-centered hero div.
     position: 'absolute' as const,
     top: '72%',
     left: '50%',
-    width: 280,
-    height: 180,
+    width: 380,
+    height: 240,
     transform: 'translate(-50%, -50%)',
     border: '1px solid rgba(255,255,255,0.15)',
+    overflow: 'hidden',
   },
 }
