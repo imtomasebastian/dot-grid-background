@@ -306,6 +306,7 @@ not just architected that way internally:
 | `seed` | `number` | `0` | integer seed for all per-dot randomness (cluster layout, opacity, size, rotation); same seed reproduces the field |
 | `pageAligned` | `boolean` | `false` | anchor the lattice to page coords so grids sharing `seed` + `gridSpacing` read as one continuous field (overlap/stack); stays aligned across resize + scroll |
 | `cursorTracking` | `'hover' \| 'global'` | `'global'` | `'global'` follows the cursor anywhere (bounded by influenceRadius); `'hover'` reacts only when the cursor is over this instance |
+| `freeze` | `boolean` | `false` | render the grid as a fully static pattern — no cursor push/glow, no ripples; any existing displacement eases back to rest, then the draw loop parks |
 | `fadeInDuration` | `number` | `1200` | React-only: mount fade-in (ms) |
 | `className` | `string` | — | React-only: wrapper class |
 | `style` | `CSSProperties` | — | React-only: wrapper inline style |

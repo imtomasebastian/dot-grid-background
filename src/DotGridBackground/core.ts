@@ -164,7 +164,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
    * cursor is treated as absent, letting the loop park (see `settled`).
    */
   function activeMouse(): MousePos | null {
-    if (!mouse) return null
+    if (!mouse || opts.freeze) return null
     const reach = Math.max(opts.influenceRadius, opts.glowRadius) + opts.gridSpacing * 2
     return mouse.x > -reach && mouse.x < canvasW + reach &&
            mouse.y > -reach && mouse.y < canvasH + reach
@@ -362,9 +362,12 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       ? Math.max(Math.abs(rippleRGB[0] - base[0]), Math.abs(rippleRGB[1] - base[1]), Math.abs(rippleRGB[2] - base[2]))
       : 0
 
-    // Prune finished ripples and precompute per-frame wavefront state
+    // Prune finished ripples and precompute per-frame wavefront state. A frozen
+    // grid drops any in-flight ripple immediately, not just future ones (which
+    // onPointerDown/onRippleBroadcast already block from spawning).
     const twoSigmaSq = 2 * rippleWidth * rippleWidth
     const bandCutoff = rippleWidth * 3
+    if (opts.freeze) ripples = []
     ripples = ripples.filter(r => (now - r.start) * rippleSpeed <= rippleMaxRadius)
     const rippleFronts = ripples.map(r => {
       const waveRadius = (now - r.start) * rippleSpeed
@@ -664,7 +667,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   }
 
   function onPointerDown(e: PointerEvent) {
-    if (!opts.rippleEnabled) return
+    if (!opts.rippleEnabled || opts.freeze) return
     const parent = canvas.parentElement
     if (!parent) return
     const rect = parent.getBoundingClientRect()
@@ -688,7 +691,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   }
 
   function onRippleBroadcast(e: Event) {
-    if (!opts.rippleEnabled || !rippleSync()) return
+    if (!opts.rippleEnabled || !rippleSync() || opts.freeze) return
     const { group, clientX, clientY } = (e as CustomEvent<RippleBroadcast>).detail
     if (group !== opts.rippleGroup) return
     const parent = canvas.parentElement

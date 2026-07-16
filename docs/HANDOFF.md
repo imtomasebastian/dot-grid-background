@@ -316,6 +316,28 @@ zero-dependency. Known acceptable deviation: when displaced shapes overlap *whil
 batched same-colour opaque fills anti-alias the overlap as a union instead of double-blending
 edge pixels (subpixel-level, imperceptible; none at rest — proven by the 0-diff screenshots).
 
+## `freeze` prop — done this session (branch `freeze`)
+
+User's ask: a way to use the grid as a plain static decorative pattern — no push, no glow,
+no ripple, no reaction of any kind.
+
+- **`freeze?: boolean`** (default `false`). When `true`, `activeMouse()` returns `null`
+  unconditionally, so the push/glow branch in `draw()` (already gated on `if (m)`) never runs.
+  In-flight ripples are cleared immediately (`if (opts.freeze) ripples = []`) and
+  `onPointerDown`/`onRippleBroadcast` bail early so new ones can't spawn either.
+- No new physics path needed — with the cursor and ripples both suppressed, `targetX/targetY`
+  fall back to `dot.gx/dot.gy` (the existing default), so any prior displacement eases back to
+  rest via the normal `returnSpeed` spring, and the existing settle-parking logic (`maxDispSq <
+  1e-4`) parks the draw loop once it arrives. Toggling `freeze` off restores normal reactivity
+  immediately (no separate re-enable path).
+- Demo: `freeze` toggle added to the `dots` DialKit folder, wired into the shared `field` object
+  (both grid instances).
+- **Verified live** via `agent-browser`: hovering with `freeze: true` produces a 0%-pixel-diff
+  screenshot vs. rest (vs. ~0.7% with it off); a dispatched click produces no ripple; toggling
+  `freeze` off restores the ~0.7% hover diff; re-enabling `freeze` while still hovering eases the
+  grid back to and settles at a canvas pixel-identical to a from-rest frozen state (0% diff).
+  `npx tsc -p tsconfig.app.json --noEmit` passes clean.
+
 ## Possible next steps (nothing committed to)
 - **npm packaging**: `PACKAGING.md` steps 4–8 remain (README, LICENSE, `npm pack` local test, flip `private` to `false`, `npm publish`). Explicitly deferred — do only when asked.
 - **Consume in another project**: add `"dot-grid-background": "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"` to that project's `package.json` and `npm install`. Bump the `#vX.Y.Z` tag (new tag pushed from this repo) to pick up updates.

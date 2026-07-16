@@ -13,6 +13,7 @@ export default function App() {
       seed:         [0, 0, 20, 1] as [number, number, number, number],
       pageAligned:  true,
       bottomFade:   false,
+      freeze:       false,
     },
     shape: {
       type:           { type: 'select', options: ['dot', 'square', 'triangle', 'line'], default: 'dot' } as const,
@@ -79,6 +80,7 @@ export default function App() {
     seed: p.dots.seed,
     pageAligned: p.dots.pageAligned,
     bottomFade: p.dots.bottomFade,
+    freeze: p.dots.freeze,
     shape: p.shape.type as 'dot' | 'square' | 'triangle' | 'line',
     shapeRotation: p.shape.rotation,
     shapeRotationRandom: p.shape.rotationMode as 'none' | 'jitter' | 'steps',

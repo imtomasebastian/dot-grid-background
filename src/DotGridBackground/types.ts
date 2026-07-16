@@ -265,6 +265,15 @@ export interface DotGridOptions {
    * discrete cards/tiles that should light up only when pointed at.
    */
   cursorTracking?: 'hover' | 'global'
+
+  /**
+   * Render the grid as a fully static pattern: no cursor push/glow, no click
+   * ripples, no reaction of any kind. Any existing displacement eases back to
+   * rest (via `returnSpeed`) and then the draw loop parks. Useful for using
+   * the grid as a plain decorative pattern rather than an interactive effect.
+   * Default: false
+   */
+  freeze?: boolean
 }
 
 /**
@@ -316,6 +325,7 @@ export const DEFAULTS: ResolvedDotGridOptions = {
   seed: 0,
   pageAligned: false,
   cursorTracking: 'global',
+  freeze: false,
 }
 
 export function resolveOptions(opts: DotGridOptions): ResolvedDotGridOptions {
