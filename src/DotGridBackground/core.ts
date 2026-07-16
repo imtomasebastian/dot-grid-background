@@ -38,6 +38,13 @@ interface Dot {
    * per-frame trig or canvas transforms.
    */
   verts: Array<[number, number]>
+  /**
+   * Quantised rest alpha in thousandths (0–1000, the precision painted into
+   * the rgba() style): baseOpacity × restOpacity × bottomFade, cached by
+   * refreshAlphas() so the hot loop never recomputes or re-stringifies it.
+   * 0 ⇒ invisible — the draw loop skips the dot entirely.
+   */
+  alphaQ: number
 }
 
 interface MousePos {
@@ -85,8 +92,11 @@ const SALT_OPACITY = 1
 const SALT_SIZE = 2
 const SALT_ROTATION = 3
 
+const TWO_PI = Math.PI * 2
+
 export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOptions = {}): DotGrid {
   let opts = resolveOptions(initialOpts)
+  const ctx = canvas.getContext('2d')
   let dots: Dot[] = []
   let canvasW = 0
   let canvasH = 0
@@ -95,6 +105,72 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
   let rafId: number | null = null
 
   let lastClient: { x: number; y: number } | null = null // raw viewport cursor
+
+  /**
+   * True when the last painted frame is provably final: cursor out of reach,
+   * no live ripples, every dot settled home. The rAF loop keeps ticking but
+   * skips draw() entirely until an input or option change flips this back.
+   */
+  let settled = false
+  let mouseWasActive = false
+
+  /** Inputs the cached per-dot alphaQ values were computed from. */
+  let styleToken = ''
+
+  // rgba() strings memoised by packed (r,g,b,alphaQ) key. Keys are
+  // self-describing, so entries never go stale; the cap only bounds memory
+  // for long-running colour animations that sweep many distinct tints.
+  const styleCache = new Map<number, string>()
+
+  function styleFor(key: number): string {
+    let s = styleCache.get(key)
+    if (s === undefined) {
+      if (styleCache.size > 20000) styleCache.clear()
+      const alphaQ = key % 1001
+      const rgb = (key - alphaQ) / 1001
+      s = `rgba(${(rgb >> 16) & 255},${(rgb >> 8) & 255},${rgb & 255},${(alphaQ / 1000).toFixed(3)})`
+      styleCache.set(key, s)
+    }
+    return s
+  }
+
+  /**
+   * Recompute each dot's rest alpha (baseOpacity × restOpacity × bottom fade),
+   * quantised to the 3-decimal precision the rgba() strings use. Runs only
+   * when one of its inputs changes — never per frame. Invisible dots are
+   * snapped home so skipping their physics can't leave them stranded.
+   */
+  function refreshAlphas(token: string) {
+    styleToken = token
+    const { baseOpacity, bottomFade } = opts
+    const fadeStart = canvasH * 0.75
+    const fadeRange = canvasH * 0.25
+    for (const dot of dots) {
+      let alpha = baseOpacity * dot.restOpacity
+      if (bottomFade && dot.gy > fadeStart) alpha *= 1 - (dot.gy - fadeStart) / fadeRange
+      dot.alphaQ = Math.min(1000, Math.round(alpha * 1000))
+      if (dot.alphaQ <= 0) {
+        dot.x = dot.gx
+        dot.y = dot.gy
+      }
+    }
+    settled = false
+  }
+
+  /**
+   * The cursor only affects dots within max(influenceRadius, glowRadius) of
+   * them. Beyond that (plus a cell of slack for the pageAligned overhang) a
+   * frame renders exactly as if there were no cursor at all — so a far-away
+   * cursor is treated as absent, letting the loop park (see `settled`).
+   */
+  function activeMouse(): MousePos | null {
+    if (!mouse) return null
+    const reach = Math.max(opts.influenceRadius, opts.glowRadius) + opts.gridSpacing * 2
+    return mouse.x > -reach && mouse.x < canvasW + reach &&
+           mouse.y > -reach && mouse.y < canvasH + reach
+      ? mouse
+      : null
+  }
 
   function rippleSync() {
     return !!opts.rippleGroup
@@ -221,16 +297,17 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         const radius = halfExtent
         const verts = buildShapeVerts(shape, halfExtent, angleRad)
 
-        next.push({ gx, gy, wx, wy, x: gx, y: gy, restOpacity, radius, verts })
+        next.push({ gx, gy, wx, wy, x: gx, y: gy, restOpacity, radius, verts, alphaQ: 0 })
       }
     }
     dots = next
+    styleToken = '' // alphaQ values are stale — recomputed on the next draw
+    settled = false
   }
 
   // --- Draw frame ---
 
   function draw() {
-    const ctx = canvas.getContext('2d')
     if (!ctx) return
 
     const { shape, lineWidth, influenceRadius, maxPush, returnSpeed,
@@ -240,6 +317,11 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
             bottomFade,
             rippleSpeed, rippleAmplitude, rippleWidth, rippleMaxRadius,
             rippleColor, rippleColorIntensity } = opts
+
+    // Per-dot alpha only changes with these inputs — refresh the cache when
+    // one of them does, instead of recomputing 100k alphas every frame.
+    const token = `${baseColor}|${baseOpacity}|${bottomFade}|${canvasH}`
+    if (token !== styleToken) refreshAlphas(token)
 
     const now = performance.now()
     const time = now * noiseSpeed
@@ -259,38 +341,73 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       : glowSoftness
 
     const glowRadiusSq = effGlowRadius * effGlowRadius
-    const maxRadiusSq = Math.max(radiusSq, glowRadius * glowRadius)
+    // Without a glow colour the glow branch can never tint, so the outer
+    // distance gate tightens to influenceRadius alone.
+    const maxRadiusSq = glowColor ? Math.max(radiusSq, glowRadius * glowRadius) : radiusSq
 
     // Parse colours once per frame (cheap for a handful of values)
     const base = parseColor(baseColor)
     const glowRGB = glowColor ? parseColor(glowColor) : null
     const rippleRGB = rippleColor ? parseColor(rippleColor) : null
 
+    // Packed style key of an untinted dot = baseKey + its quantised alpha.
+    const baseKey = ((base[0] << 16) | (base[1] << 8) | base[2]) * 1001
+    // Largest per-channel shift each tint can cause. When the combined shift
+    // is < 0.5 on every channel, Math.round provably lands back on the base
+    // colour, so the whole colour pass can be skipped with identical output.
+    const glowMaxDelta = glowRGB
+      ? Math.max(Math.abs(glowRGB[0] - base[0]), Math.abs(glowRGB[1] - base[1]), Math.abs(glowRGB[2] - base[2]))
+      : 0
+    const rippleMaxDelta = rippleRGB
+      ? Math.max(Math.abs(rippleRGB[0] - base[0]), Math.abs(rippleRGB[1] - base[1]), Math.abs(rippleRGB[2] - base[2]))
+      : 0
+
     // Prune finished ripples and precompute per-frame wavefront state
+    const twoSigmaSq = 2 * rippleWidth * rippleWidth
+    const bandCutoff = rippleWidth * 3
     ripples = ripples.filter(r => (now - r.start) * rippleSpeed <= rippleMaxRadius)
     const rippleFronts = ripples.map(r => {
       const waveRadius = (now - r.start) * rippleSpeed
+      const outer = waveRadius + bandCutoff
+      const inner = Math.max(0, waveRadius - bandCutoff)
       return {
         x: r.x, y: r.y,
         waveRadius,
         decay: 1 - waveRadius / rippleMaxRadius,
+        // squared band bounds — reject dots without a sqrt
+        outerSq: outer * outer,
+        innerSq: inner * inner,
       }
     })
-    const twoSigmaSq = 2 * rippleWidth * rippleWidth
-    const bandCutoff = rippleWidth * 3
 
-    ctx.clearRect(0, 0, canvasW, canvasH)
-    if (shape === 'line') ctx.lineWidth = lineWidth
+    const m = activeMouse()
+
+    // --- Batching ---
+    // Opaque dots are grouped by their final rgba() style and painted as one
+    // path per style (one fill/stroke instead of one per dot). A same-style
+    // *opaque* fill composites identically whether shapes are painted together
+    // or one by one, so this is safe regardless of overlap. Translucent
+    // overlaps do NOT composite the same way (separate fills double-blend, and
+    // blend order matters once tints differ), so translucent dots keep the
+    // original per-dot painting in grid order.
+    const batches = new Map<number, Dot[]>()
+    let lastKey = -1
+    let lastArr: Dot[] | null = null
+    const dynDots: Dot[] = []
+    const dynKeys: number[] = []
+    let maxDispSq = 0
 
     for (const dot of dots) {
+      if (dot.alphaQ <= 0) continue // invisible (cluster gap / bottom fade / opacity 0)
+
       let targetX = dot.gx
       let targetY = dot.gy
       let influence = 0       // push + noise (influenceRadius)
       let colorInfluence = 0  // glow colour (glowRadius)
 
-      if (mouse) {
-        const dx = dot.gx - mouse.x
-        const dy = dot.gy - mouse.y
+      if (m) {
+        const dx = dot.gx - m.x
+        const dy = dot.gy - m.y
         const distSq = dx * dx + dy * dy
 
         if (distSq > 0 && distSq < maxRadiusSq) {
@@ -307,14 +424,16 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
             // Organic noise layered on top of the repel. Sampled from world
             // coords so the wobble matches across pageAligned grids (wx/wy == gx/gy
             // when alignment is off, so a solo grid is unchanged).
-            const noiseX = noise2d(dot.wx * noiseScale, dot.wy * noiseScale + time)
-            const noiseY = noise2d(dot.wx * noiseScale + 100, dot.wy * noiseScale + time)
-            const noiseMag = influence * influence * noiseAmplitude
-            targetX += noiseX * noiseMag
-            targetY += noiseY * noiseMag
+            if (noiseAmplitude !== 0) {
+              const noiseX = noise2d(dot.wx * noiseScale, dot.wy * noiseScale + time)
+              const noiseY = noise2d(dot.wx * noiseScale + 100, dot.wy * noiseScale + time)
+              const noiseMag = influence * influence * noiseAmplitude
+              targetX += noiseX * noiseMag
+              targetY += noiseY * noiseMag
+            }
           }
 
-          if (distSq < glowRadiusSq) {
+          if (glowRGB && distSq < glowRadiusSq) {
             // Smoothstep falloff with a solid core: full tint through the inner
             // (1 - effGlowSoftness) fraction of the radius, feathering only in the outer band.
             const norm = dist / effGlowRadius
@@ -335,10 +454,10 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
         for (const rip of rippleFronts) {
           const rdx = dot.gx - rip.x
           const rdy = dot.gy - rip.y
-          const rd = Math.sqrt(rdx * rdx + rdy * rdy)
-          if (rd <= 0) continue
+          const rdSq = rdx * rdx + rdy * rdy
+          if (rdSq <= 0 || rdSq < rip.innerSq || rdSq > rip.outerSq) continue
+          const rd = Math.sqrt(rdSq)
           const front = rd - rip.waveRadius
-          if (front > bandCutoff || front < -bandCutoff) continue
           const env = Math.exp(-(front * front) / twoSigmaSq)
           targetX += (rdx / rd) * env * rippleAmplitude * rip.decay
           targetY += (rdy / rd) * env * rippleAmplitude * rip.decay
@@ -351,76 +470,127 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       dot.x += (targetX - dot.x) * returnSpeed
       dot.y += (targetY - dot.y) * returnSpeed
 
-      // --- Alpha ---
-      let alpha = baseOpacity * dot.restOpacity
-
-      // Bottom fade: starts at 75% of canvas height
-      if (bottomFade && dot.gy > canvasH * 0.75) {
-        alpha *= 1 - (dot.gy - canvasH * 0.75) / (canvasH * 0.25)
-      }
+      const ddx = dot.x - dot.gx
+      const ddy = dot.y - dot.gy
+      const dispSq = ddx * ddx + ddy * ddy
+      if (dispSq > maxDispSq) maxDispSq = dispSq
 
       // --- Colour ---
-      // Glow and ripple each compute their own delta from `base` independently, then the
-      // deltas are summed. Blending ripple from the glow's already-tinted output (instead of
-      // from base) would make the ripple vanish wherever the glow phase already leans toward
-      // rippleColor — this keeps the two effects from competing for the same channel.
-      let glowDR = 0, glowDG = 0, glowDB = 0
+      let key = baseKey + dot.alphaQ
+      if (colorInfluence > 0 || (rippleRGB !== null && rippleColorAmt > 0)) {
+        const glowAmt = colorInfluence > 0 ? colorInfluence * effGlowIntensity : 0
+        const rippleAmt = rippleRGB !== null && rippleColorAmt > 0
+          ? Math.min(1, rippleColorAmt * rippleColorIntensity)
+          : 0
 
-      if (colorInfluence > 0 && glowRGB) {
-        const amt = colorInfluence * effGlowIntensity
-        glowDR = amt * (glowRGB[0] - base[0])
-        glowDG = amt * (glowRGB[1] - base[1])
-        glowDB = amt * (glowRGB[2] - base[2])
-      }
-
-      let rippleDR = 0, rippleDG = 0, rippleDB = 0
-
-      if (rippleRGB && rippleColorAmt > 0) {
-        const amt = Math.min(1, rippleColorAmt * rippleColorIntensity)
-        rippleDR = amt * (rippleRGB[0] - base[0])
-        rippleDG = amt * (rippleRGB[1] - base[1])
-        rippleDB = amt * (rippleRGB[2] - base[2])
-      }
-
-      // Sum the two deltas rather than picking a winner: a "larger delta wins" combine still
-      // lets a strong, sustained glow delta swamp a weaker ripple delta on the same channel
-      // (e.g. mid-decay ripple envelope against a fully-saturated glow) — the exact muting this
-      // fix targets. Summing guarantees the ripple always contributes visibly, scaled by its own
-      // envelope/intensity, regardless of what the glow is doing on that channel.
-      const r = Math.round(Math.max(0, Math.min(255, base[0] + glowDR + rippleDR)))
-      const g = Math.round(Math.max(0, Math.min(255, base[1] + glowDG + rippleDG)))
-      const b = Math.round(Math.max(0, Math.min(255, base[2] + glowDB + rippleDB)))
-
-      if (alpha <= 0) continue
-
-      // Colour math above is shared by every shape; only the final paint differs.
-      if (shape === 'line') {
-        const [[x1, y1], [x2, y2]] = dot.verts
-        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
-        ctx.beginPath()
-        ctx.moveTo(dot.x + x1, dot.y + y1)
-        ctx.lineTo(dot.x + x2, dot.y + y2)
-        ctx.stroke()
-      } else {
-        ctx.fillStyle = `rgba(${r},${g},${b},${alpha.toFixed(3)})`
-        ctx.beginPath()
-        if (shape === 'dot') {
-          ctx.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2)
-        } else {
-          const [[x0, y0], ...rest] = dot.verts
-          ctx.moveTo(dot.x + x0, dot.y + y0)
-          for (const [vx, vy] of rest) ctx.lineTo(dot.x + vx, dot.y + vy)
-          ctx.closePath()
+        // Skip the colour math when rounding provably lands on base anyway.
+        if (glowAmt * glowMaxDelta + rippleAmt * rippleMaxDelta >= 0.5) {
+          // Glow and ripple each compute their own delta from `base` independently, then the
+          // deltas are summed. Blending ripple from the glow's already-tinted output (instead of
+          // from base) would make the ripple vanish wherever the glow phase already leans toward
+          // rippleColor — this keeps the two effects from competing for the same channel.
+          //
+          // Sum the two deltas rather than picking a winner: a "larger delta wins" combine still
+          // lets a strong, sustained glow delta swamp a weaker ripple delta on the same channel
+          // (e.g. mid-decay ripple envelope against a fully-saturated glow) — the exact muting this
+          // fix targets. Summing guarantees the ripple always contributes visibly, scaled by its own
+          // envelope/intensity, regardless of what the glow is doing on that channel.
+          let dr = 0, dg = 0, db = 0
+          if (glowAmt > 0 && glowRGB) {
+            dr = glowAmt * (glowRGB[0] - base[0])
+            dg = glowAmt * (glowRGB[1] - base[1])
+            db = glowAmt * (glowRGB[2] - base[2])
+          }
+          if (rippleAmt > 0 && rippleRGB) {
+            dr += rippleAmt * (rippleRGB[0] - base[0])
+            dg += rippleAmt * (rippleRGB[1] - base[1])
+            db += rippleAmt * (rippleRGB[2] - base[2])
+          }
+          const r = Math.round(Math.max(0, Math.min(255, base[0] + dr)))
+          const g = Math.round(Math.max(0, Math.min(255, base[1] + dg)))
+          const b = Math.round(Math.max(0, Math.min(255, base[2] + db)))
+          key = (((r << 16) | (g << 8) | b)) * 1001 + dot.alphaQ
         }
-        ctx.fill()
+      }
+
+      if (dot.alphaQ >= 1000) {
+        // Neighbouring dots usually share a style — reuse the last bucket to
+        // skip the Map lookup for long same-style runs.
+        if (key === lastKey && lastArr) {
+          lastArr.push(dot)
+        } else {
+          let arr = batches.get(key)
+          if (!arr) {
+            arr = []
+            batches.set(key, arr)
+          }
+          arr.push(dot)
+          lastKey = key
+          lastArr = arr
+        }
+      } else {
+        dynDots.push(dot)
+        dynKeys.push(key)
       }
     }
+
+    // --- Paint ---
+    ctx.clearRect(0, 0, canvasW, canvasH)
+    const isLine = shape === 'line'
+    if (isLine) ctx.lineWidth = lineWidth
+
+    // Physics/colour above is shared by every shape; only the path tracing differs.
+    const trace = (dot: Dot) => {
+      if (shape === 'dot') {
+        // moveTo the arc's start point so subpaths don't get connecting chords
+        ctx.moveTo(dot.x + dot.radius, dot.y)
+        ctx.arc(dot.x, dot.y, dot.radius, 0, TWO_PI)
+      } else if (isLine) {
+        const v = dot.verts
+        ctx.moveTo(dot.x + v[0][0], dot.y + v[0][1])
+        ctx.lineTo(dot.x + v[1][0], dot.y + v[1][1])
+      } else {
+        const v = dot.verts
+        ctx.moveTo(dot.x + v[0][0], dot.y + v[0][1])
+        for (let i = 1; i < v.length; i++) ctx.lineTo(dot.x + v[i][0], dot.y + v[i][1])
+        ctx.closePath()
+      }
+    }
+
+    for (const [key, arr] of batches) {
+      const style = styleFor(key)
+      if (isLine) ctx.strokeStyle = style
+      else ctx.fillStyle = style
+      ctx.beginPath()
+      for (const dot of arr) trace(dot)
+      if (isLine) ctx.stroke()
+      else ctx.fill()
+    }
+
+    // Translucent dots — painted one by one, in grid order, exactly like the
+    // pre-batching renderer (see the batching note above).
+    for (let i = 0; i < dynDots.length; i++) {
+      const style = styleFor(dynKeys[i])
+      if (isLine) ctx.strokeStyle = style
+      else ctx.fillStyle = style
+      ctx.beginPath()
+      trace(dynDots[i])
+      if (isLine) ctx.stroke()
+      else ctx.fill()
+    }
+
+    // This frame is final if nothing can move or change colour anymore:
+    // cursor absent/out of reach, no live ripples, every dot home. Park the
+    // loop; input/option changes flip `settled` back.
+    if (!m && rippleFronts.length === 0 && maxDispSq < 1e-4) settled = true
   }
 
   // --- Animation loop ---
 
   function loop() {
-    draw()
+    // While settled, the canvas already shows the final frame — keep ticking
+    // (cheap) but skip all physics and painting.
+    if (!settled) draw()
     rafId = requestAnimationFrame(loop)
   }
 
@@ -439,7 +609,6 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     canvas.style.width = `${w}px`
     canvas.style.height = `${h}px`
 
-    const ctx = canvas.getContext('2d')
     ctx?.scale(dpr, dpr)
 
     canvasW = w
@@ -462,21 +631,26 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     const parent = canvas.parentElement
     if (!lastClient || !parent) {
       mouse = null
-      return
-    }
-    const rect = parent.getBoundingClientRect()
-    const localX = lastClient.x - rect.left
-    const localY = lastClient.y - rect.top
+    } else {
+      const rect = parent.getBoundingClientRect()
+      const localX = lastClient.x - rect.left
+      const localY = lastClient.y - rect.top
 
-    if (opts.cursorTracking === 'global') {
-      mouse = { x: localX, y: localY }
-      return
+      if (opts.cursorTracking === 'global') {
+        mouse = { x: localX, y: localY }
+      } else {
+        const overSelf =
+          lastClient.x >= rect.left && lastClient.x <= rect.right &&
+          lastClient.y >= rect.top && lastClient.y <= rect.bottom
+        mouse = overSelf ? { x: localX, y: localY } : null
+      }
     }
 
-    const overSelf =
-      lastClient.x >= rect.left && lastClient.x <= rect.right &&
-      lastClient.y >= rect.top && lastClient.y <= rect.bottom
-    mouse = overSelf ? { x: localX, y: localY } : null
+    // Wake the draw loop only when the cursor is (or just was) within reach —
+    // movement far outside a parked grid can't change any dot, so it stays parked.
+    const active = activeMouse() !== null
+    if (active || mouseWasActive) settled = false
+    mouseWasActive = active
   }
 
   function onMouseMove(e: MouseEvent) {
@@ -510,6 +684,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     }
 
     ripples.push({ x: e.clientX - rect.left, y: e.clientY - rect.top, start: performance.now() })
+    settled = false
   }
 
   function onRippleBroadcast(e: Event) {
@@ -520,6 +695,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
     if (!parent) return
     const rect = parent.getBoundingClientRect()
     ripples.push({ x: clientX - rect.left, y: clientY - rect.top, start: performance.now() })
+    settled = false
   }
 
   window.addEventListener('mousemove', onMouseMove)
@@ -544,6 +720,7 @@ export function createDotGrid(canvas: HTMLCanvasElement, initialOpts: DotGridOpt
       }
       delete incoming.clusterSeed
       opts = resolveOptions({ ...prev, ...incoming })
+      settled = false // any option can change the rendered frame
 
       // Rebuild grid if spacing, opacityRange, any cluster prop, the seed, page
       // alignment, or any shape/size/rotation prop changed (all affect the

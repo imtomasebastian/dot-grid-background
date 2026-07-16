@@ -22,11 +22,10 @@ const perm = new Uint8Array(512)
   for (let i = 0; i < 512; i++) perm[i] = p[i & 255]
 }
 
-// 2D gradient vectors (unit vectors at 8 angles)
-const GRADS: [number, number][] = [
-  [1, 1], [-1, 1], [1, -1], [-1, -1],
-  [1, 0], [-1, 0], [0, 1], [0, -1],
-]
+// 2D gradient vectors (unit vectors at 8 angles), stored as flat typed arrays —
+// this is the hottest function in the engine, so skip the tuple indirection.
+const GRAD_X = new Float64Array([1, -1, 1, -1, 1, -1, 0, 0])
+const GRAD_Y = new Float64Array([1, 1, -1, -1, 0, 0, 1, -1])
 
 function fade(t: number): number {
   return t * t * t * (t * (t * 6 - 15) + 10)
@@ -37,16 +36,18 @@ function lerp(a: number, b: number, t: number): number {
 }
 
 function grad(hash: number, x: number, y: number): number {
-  const g = GRADS[hash & 7]
-  return g[0] * x + g[1] * y
+  const i = hash & 7
+  return GRAD_X[i] * x + GRAD_Y[i] * y
 }
 
 /** Returns a smooth pseudo-random value in approximately [-1, 1]. */
 export function noise2d(x: number, y: number): number {
-  const xi = Math.floor(x) & 255
-  const yi = Math.floor(y) & 255
-  const xf = x - Math.floor(x)
-  const yf = y - Math.floor(y)
+  const fx = Math.floor(x)
+  const fy = Math.floor(y)
+  const xi = fx & 255
+  const yi = fy & 255
+  const xf = x - fx
+  const yf = y - fy
   const u = fade(xf)
   const v = fade(yf)
 

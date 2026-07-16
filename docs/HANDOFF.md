@@ -272,6 +272,50 @@ recoloured grid can sit "inside" a larger one with dots that line up. Designed c
   eyeballed in the running demo** — the design flagged this needs the dev server + eyes (tsc won't
   catch a phase-offset bug); run `npm run dev` and toggle `pageAligned` to confirm before shipping.
 
+## Performance rework (branch `perf-upgrades`) — done this session
+
+User-reported symptom: tight configs (gridSpacing 4, shapeSize 2 → ~100k dots on a large
+viewport) get laggy. Requirement: improve performance while keeping the output **exactly**
+identical. All changes are in `core.ts` + `perlin.ts`; no API/props changes.
+
+What was done (in rough order of impact):
+1. **Style batching (opaque dots)** — dots are grouped per final rgba() style and painted as
+   one multi-subpath `fill()`/`stroke()` per style instead of one per dot (the former ~100k
+   `beginPath/fill` pairs dominated frame time). Only **opaque** (`alphaQ >= 1000`) dots batch:
+   a same-style opaque fill composites identically regardless of grouping/overlap, while
+   translucent overlaps double-blend when painted separately — so translucent dots keep the
+   original per-dot painting in grid order (no regression, just no speedup there). rgba()
+   strings are memoised in a Map keyed by packed `(r,g,b,alphaQ)` int (capped, self-describing
+   keys). A `lastKey/lastArr` fast path skips the Map lookup for same-style runs.
+2. **Cached per-dot rest alpha (`dot.alphaQ`)** — `baseOpacity × restOpacity × bottomFade`,
+   quantised to the same 3-decimal precision the old `alpha.toFixed(3)` painted, recomputed by
+   `refreshAlphas()` only when one of its inputs (or canvasH) changes — never per frame.
+   `alphaQ <= 0` dots (cluster gaps etc.) are skipped entirely, including physics (they're
+   snapped home when going invisible so they can't strand mid-displacement).
+3. **Settle parking** — when the frame is provably final (cursor absent or out of reach —
+   `activeMouse()` bounds by max(influenceRadius, glowRadius) — no live ripples, max dot
+   displacement < 1e-4), `settled = true` and the rAF loop keeps ticking but skips `draw()`
+   entirely. Unset by mousemove near the grid, pointerdown/ripple broadcast, `update()`,
+   and rebuilds. Idle CPU is ~zero for offscreen/undisturbed grids.
+4. **Cheaper per-dot math** — ripple band test now rejects via squared distances (sqrt only
+   inside the band); glow smoothstep branch gated on `glowRGB` being set; noise2d calls skipped
+   when `noiseAmplitude === 0`; colour blend skipped when the max possible channel shift < 0.5
+   (rounds back to base anyway — provably identical); `getContext('2d')` hoisted out of draw.
+5. **perlin.ts** — gradient table as flat Float64Arrays, single `Math.floor` per axis.
+
+Measured (M-series Mac, 1600×1000 @2x, spacing 4 / size 2, glow + ripple colours on):
+idle 53.7 → 60 fps (flat 16.7ms), hover 44 → ~60 fps, hover+ripples 32.5 → 53 fps
+(worst frame 116ms → 33ms).
+
+**Verified pixel-identical** via `agent-browser` screenshot diffs (0 of 6.4M pixels differ):
+rest state before/after; rest state after a full push+ripple interaction then settling; and a
+translucent config (`bottomFade: true, opacityRange: 0.6, baseOpacity: 0.8`) old-vs-new via
+`git stash` A/B. Wake-from-parked verified by canvas pixel sampling (no tint while parked,
+glow tint appears on cursor entry). `npx tsc -p tsconfig.app.json --noEmit` clean; core still
+zero-dependency. Known acceptable deviation: when displaced shapes overlap *while moving*,
+batched same-colour opaque fills anti-alias the overlap as a union instead of double-blending
+edge pixels (subpixel-level, imperceptible; none at rest — proven by the 0-diff screenshots).
+
 ## Possible next steps (nothing committed to)
 - **npm packaging**: `PACKAGING.md` steps 4–8 remain (README, LICENSE, `npm pack` local test, flip `private` to `false`, `npm publish`). Explicitly deferred — do only when asked.
 - **Consume in another project**: add `"dot-grid-background": "git+https://github.com/imtomasebastian/dot-grid-background.git#v0.1.0"` to that project's `package.json` and `npm install`. Bump the `#vX.Y.Z` tag (new tag pushed from this repo) to pick up updates.
